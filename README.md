@@ -2,10 +2,6 @@
 
 Bu depo, Ödemiş Ayhan Kökmen Fen Lisesi robotik takımı **Team Turquoise** tarafından yürütülen hızlı çizgi izleyen robot projesinin tüm kaynak kodlarını, donanım mimarisini, test protokollerini, tur kronometresini ve teknik yarışma dokümantasyonunu içerir.
 
-Depo iki uzak sunucuyla eşzamanlanmaktadır:
-- `origin`: `https://github.com/umutKaracelebi/turquoise_hizli_cizgi_izleyen` (Takım ana çalışma deposu)
-- `yedek`: `https://github.com/umutKaracelebi/hizli-cizgi-yedek` (Yedek kopya)
-
 ---
 
 ## 1. Donanım Mimarisi ve Bileşenler
