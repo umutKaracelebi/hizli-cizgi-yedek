@@ -42,6 +42,7 @@ Güncelleme: 16 Eylül 2026. Bu belge, kullanıcının anlattıklarıyla yerel d
 - `connector-photos/`: üç parça grubunun ön/arka altı fotoğrafı.
 - `pist1.pdf`, `pist2.pdf`: birer sayfalık vektörel pistler. PDF dış ölçüleri yaklaşık 200 × 300 cm.
 - Kök, MEBSTART test klasörü ve kronometre klasöründe ayrı `.git` dizinleri bulunuyor. Üçünde de inceleme anında commit yok; proje dosyaları izlenmiyor. Bu nedenle tarihlendirilmiş bir geliştirme geçmişi çıkarılamadı. Git iç verileri ve araç ayarları uygulama kaynağı olarak incelenmedi.
+- 24 Eylul 2026: ic ice iki bos `.git` dizini (MEBSTART + kronometre; ikisi de sifir commitliydi) kaldirildi; proje tek depoda birlesti, `main` dalinda ilk yedekleme commiti olusturuldu ve `origin` + `yedek` remote'larina force ile itildi (repolardaki GitHub sablon baslangic commiti uzerine yazildi, eski `gitlab` remote'u korundu). Bundan sonraki her yedek/push: `git add -A && git commit -m "..." && git push origin main && git push yedek main`. IYARI: uretici firmware'i (orijinal 5 sekme + ATLAS_Takim turevi + kilavuz PDF'leri) CC BY-NC-ND 4.0 lisansli; ND maddesi degistirilmis surumlerin kamuya acik dagitimini yasakliyor. Bu icerik yalniz `private` repo'da gizli kalmali; `yedek` repo su an public ve gecici — kullanici isi bitince silecek. ATLAS_Debug ve kendi dokumanlarimiz sorunsuzdur.
 
 ## Bugüne kadarki gelişim — kanıt düzeyleri
 
