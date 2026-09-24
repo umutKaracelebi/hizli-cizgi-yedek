@@ -68,6 +68,47 @@ const bool areMotorsEnabled = true;
 // OTHERS
 #define SENSORS_THRESHOLD_PCT 50
 
+//  ============================================
+//  D E B U G   /   T R A C E   O P T I O N S
+//  ============================================
+
+// 1 = guc verilirken SW1/SW2 basmaya gerek yok, dogrudan debug moduna girilir
+// (robot bu durumda pist kodunu calistirmaz, sadece test modunda kalir)
+#define DEBUG_MODE_ALWAYS_ON 1
+
+// debug cikisi nereden okunacak:
+//   1 = debugMode()        -> MCU TX/RX uzerinden interaktif serial konsol,
+//                             USB-TTL / USB-serial adaptor gerekir (115200 baud)
+//   0 = debugModeNoSerial()-> serial YOK; olcumler dahili EEPROM'a yazilir ve
+//                             kodu yuklediginiz programlayici ile geri okunur
+#define DEBUG_MODE_USE_SERIAL 1
+
+// EEPROM iz (trace) uzunluklari - ATmega328P dahili EEPROM: 1024 byte
+// ham/ kalibre sensor izi: kayit basina 16 byte -> en fazla 63 kayit
+#define EEPROM_TRACE_SENSOR_SAMPLES 63      // 63 x 50 ms = ~3.15 s iz
+#define EEPROM_TRACE_SENSOR_PERIOD_MS 50    // kayitlar arasi sure (ms)
+// cizgi konum izi: kayit basina 3 byte -> en fazla 337 kayit
+#define EEPROM_TRACE_POSITION_SAMPLES 300   // 300 x 10 ms = 3 s iz
+#define EEPROM_TRACE_POSITION_PERIOD_MS 10  // kayitlar arasi sure (ms)
+// guc / tribun izi: kayit basina 3 byte (tribun PWM, ADC6, ADC7) -> en fazla 337 kayit
+#define EEPROM_TRACE_POWER_SAMPLES 337      // 337 x 20 ms = ~6.7 s iz
+#define EEPROM_TRACE_POWER_PERIOD_MS 20     // kayitlar arasi sure (ms)
+
+// acilista menude on-secili test numarasi (0..7)
+#define DEBUG_MODE_START_OPERATION 1
+
+//  ------------------------------------------------------------
+//  T R I B U N   ( I M P E L L E R )   T E S T   S E T T I N G S
+//  ------------------------------------------------------------
+// SW1 ile secilen tribun PWM seviyeleri (LED_1 kac kez blink atarsa o seviye)
+#define IMPELLER_TEST_PWM_1 50    // 1 blink - en dusuk devir, "donmeye basliyor mu?"
+#define IMPELLER_TEST_PWM_2 100   // 2 blink
+#define IMPELLER_TEST_PWM_3 150   // 3 blink
+#define IMPELLER_TEST_PWM_4 200   // 4 blink - tam guc (= IMPELLER_PWM)
+#define IMPELLER_TEST_RAMP_TIME_MS 1000  // 0 -> hedef PWM tirmanma suresi (ms)
+#define IMPELLER_TEST_BLINK_MS 100       // rampa sirasinda LED_2 blink yarim periyodu (ms)
+
+
 //  =====================================================
 //  G L O B A L   V A R I A B L E S  /  C O N S T A N T S
 //  =====================================================
@@ -94,9 +135,13 @@ void setup() {
   bootAnimation();  // boot display animation
 
   // debug mode trigger
-  if (readButton_1() || readButton_2()) {
+  if (DEBUG_MODE_ALWAYS_ON || readButton_1() || readButton_2()) {
     confirmAnimation(500, 1);
-    debugMode();
+#if DEBUG_MODE_USE_SERIAL
+    debugMode();  // interactive console on MCU TX/RX (115200 baud)
+#else
+    debugModeNoSerial();  // serial-free EEPROM trace mode
+#endif
   }
 
   //  ===================

@@ -1,0 +1,53 @@
+ATLAS YARIS PAKETI — NASIL YUKLENIR
+===================================
+
+Bu zip IKI Arduino sketch'i icerir. KURAL: Bir Arduino "sketch"i tek
+bir .ino DOSYASI DEGIL, klasordeki TUM .ino SEKMELERIDIR. Tek dosyayi
+tek basina baska klasore tasimak/kopyalamak = eksik kod yuklemek demektir.
+
+1) ATLAS_Debug\ATLAS_Debug.ino  → donanim dogrulamasi (once bu)
+   Sekmeler: yalniz ATLAS_Debug.ino (tek dosya; klasorde baska .ino yok).
+
+2) ATLAS_Takim\ATLAS_Takim.ino  → yaris surumu (testler gecince bu)
+   Sekmeler (IDE'nin ust sekme cubugunda 5 tane gorunmeli):
+     ATLAS_Takim | Motors | RunControl | Sensors | UI
+   Bir sekme bile eksik/ayri gelirse YUKLEMEYIN; zip'i yeniden acin.
+
+YUKLEME (ikisi icin de ayni):
+  1. Arduino IDE → Dosya → Ac → ilgili klasordeki .ino'yu sec
+     (or. ATLAS_Takim\ATLAS_Takim.ino). IDE ayni klasordeki
+     diger .ino'lari OTOMATIK sekme olarak acar.
+  2. Araclar → Kart: "Arduino Nano"
+              → Processor: "ATmega328P"
+              → Programmer: "USBasp"
+     (COM portu SECILMEZ — ICSP yuklemesi port kullanmaz)
+  3. USBasp bagli: PC → USBasp → 10 pin serit → 10→6 adaptor → robot ICSP.
+     Pil takili; USBasp'da hedef-besleme jumper'i varsa ACIK kalsin.
+  4. Taslak → "Programlayici ile Yukle" (Ctrl+Shift+U). "Done uploading."
+     (Normal ok/Yukle butonu KULLANILMAZ.)
+  5. "Sketch uses ... bytes" satiri: ATLAS_Takim icin ~6518 flash / 291 SRAM,
+     ATLAS_Debug icin ~6034 flash / 204 SRAM beklenir. Cok farkliysa
+     yanlis kod yukleniyordur, dur.
+
+ONEMLI: Ureticinin orijinal 5 sekmeni (kokteki ATLAS_1.4.3.ino, Motors.ino,
+RunControl.ino, Sensors.ino, UI.ino) bu iki klasore KOPYALANMAZ /
+ICINE DOKUNULMAZ. Hata cikarsa Gemini/AI'a yamalatma; oldugu gibi hatayi
+kopyala ve takima ilet — duzeltme bu tarafta yapilir.
+
+DEBUG SKETCH KULLANIMI (bilgisayarsiz da olur):
+  Acilista 3 LED birlikte 3 kez cakar = debug yazilimi.
+  SW2 kisa bas: test sec (LED1=1, LED2=2, LED0=4; toplami oku: or. 3=LED1+LED2)
+  SW1 kisa bas: secili testi baslat
+  [1] MEBSTART/buton izleme: LED2 yanar = kumanda START geliyor demektir.
+  [2] sensor canliligi: parmagi bara yaklastir; degisen olursa LED2 yanar.
+  [3] tekerlek: LED'ler hizli cakar; SW1'i 2 sn basili tut = onay.
+  [4] turbin: SW1 ac/kapa (LED2=durum), SW2 cikis.
+  Canli testlerden cikis genel kural: SW1+SW2'ye 2 sn birlikte bas.
+  (USB-TTL bagliysa seri monitor 115200'de tum ayrintilar yazar; GND+TX+RX
+  yeter, 5V pinini baglama — robot zaten piloten besleniyor.)
+
+YARIS SURUMU AKIS (ozet):
+  Guc → (buton) → SW2'ye bas = siyah cizgi modu → kalibrasyon salla →
+  kontrast kapi → ARMED (LED0 yanip soner; SW1 hiz azalt, SW2 hiz artir) →
+  hakem START → 1 sn on-vakum → kosu → hakem STOP veya SW1+SW2 → fren →
+  kilit (yeni kosu icin RESET).
