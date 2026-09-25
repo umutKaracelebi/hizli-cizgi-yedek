@@ -59,6 +59,11 @@ const bool areMotorsEnabled = true;
 
 #define OFFLINE_OUTTER_MOTOR_PWM CONTROL_MAX_PWM_FORWARD
 #define OFFLINE_INNER_MOTOR_PWM CONTROL_MAX_PWM_BACKWARD
+// NOT (TEAM, 25 Eylul 2026): yukaridaki iki PWM ve asagidaki fren suresi
+// URETICININ eski kurtarma manevrasi icindir ve artik KULLANILMIYOR.
+// Yerine "T E A M   P A R A M E T R E L E R I" bolumundeki siniflandirmali
+// kopru + yerinde donuslu arama mantigi gecti (OFFLINE_SEARCH_PWM,
+// OFFLINE_SEARCH_PHASE_MS). Referans icin birakildi.
 
 // OTHERS
 #define SENSORS_THRESHOLD_PCT 50
@@ -71,11 +76,44 @@ const bool areMotorsEnabled = true;
 #define START_SIGNAL_CONFIRM_MS 60   // START: 0V en az bu süre stabil kalırsa geçerli
 #define STOP_SIGNAL_CONFIRM_MS 150   // STOP: 5V en az bu süre stabil kalırsa geçerli (motor titreşim koruması)
 
-// Kesik çizgi köprüleri:
-#define OFFLINE_GAP_BRIDGE_MS 15     // Köşe/zikzak dönüşlerinde gecikme yapmaması için 15 ms
-#define OFFLINE_DASH_BRIDGE_MS 75    // Düz kesikli çizgi (beyaz boşluk) geçiş köprüsü (75 ms)
-// Çizgi kaybolursa toparlama süresi tanınır (1500 ms)
-#define OFFLINE_FAILSAFE_MS 1500
+// ---------------------------------------------------------------------
+// CIZGI KAYBI YONETIMI (kesikli cizgi / keskin donus ayrimi)
+// ---------------------------------------------------------------------
+// Sorun: "kesikli cizgi"de robot beyaz bosluga girince nereye gittigi
+// belirsiz kaliyordu. Eski surumde kopru penceresi tek bir degere (15 ms)
+// bagliydi; bu sure 40-56 mm'lik beyaz bosluk icin cok kisa oldugundan
+// robot daha beyaz alandayken ureticinin sert pivot manevrasina giriyor,
+// ya geldigi cizgiye geri donuyor ya da pist disi zemin cizgisine
+// kilitleniyordu.
+//
+// Cozum: kayip ani siniflandirilir (konum merkezde mi, direksiyon duz mu
+// idi). Duz kayipta (kesikli cizgi) uzun bir DUZ DEVAM penceresi kullanilir;
+// merkezden sapan kayipta (90 derece zikzak / virak cikisi) kisa koprudan
+// sonra yumusak arama manevrasi uygulanir.
+
+// Kayip ani siniflandirmasi
+#define LINE_CENTER_POSITION 7500        // 0..15000 olceginde merkez degeri
+#define OFFLINE_DASH_CENTER_BAND 3500    // |konum - merkez| bu bant icindeyse "merkezden kayip"
+#define OFFLINE_DASH_STEER_MAX 150       // |son linePWM| bunun altindaysa "duz gidiyordu"
+
+// Kopru (kor devam) sureleri
+#define OFFLINE_GAP_BRIDGE_MS 15         // Donus/keskin kose: kisa kor devam
+#define OFFLINE_DASH_BRIDGE_MS 120       // Duz kesikli cizgi: duz devam penceresi
+#define OFFLINE_DASH_HOLD_STEER_MAX 80   // Kopruda tutulacak en fazla direksiyon (yumusak gecis)
+
+// Yeniden yakalama kapisi
+#define OFFLINE_DASH_REACQUIRE_BAND 4500 // Kesik sonrasi devam cizgisi bu bantta beklenir
+#define OFFLINE_MIN_CONFIRM_LOOPS 3      // Yeniden yakalama icin ardisik dongu teyidi
+
+// Arama manevrasi (kopru dolduktan sonra, cizgi hala yok)
+// Yerinde donus: dis teker +PWM, ic teker -PWM. Boylece robot ileri
+// kacmaz, yalnizca barini cevirerek cizgiyi arar. Faz sonunda yon
+// ters cevrilir.
+#define OFFLINE_SEARCH_PWM 120           // Arama donus siddeti (simetrik)
+#define OFFLINE_SEARCH_PHASE_MS 250      // Bir yonde arama suresi; sonra ters yon
+
+// Cizgi bu sure boyunca bulunamazsa guvenli durus (fren + kalici kilit)
+#define OFFLINE_FAILSAFE_MS 1200
 
 // Kesişim / loop geçiş köprüsü: dikey çizgi kesişiminden düz geçiş hold süresi (ms)
 #define INTERSECTION_HOLD_TIME_MS 50
