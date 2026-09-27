@@ -31,7 +31,7 @@ Bağlantı (robot start portu `+  −  GO  RDY`):
 - MEBSTART **Sinyal → GO**
 - MEBSTART **− → GND**
 - MEBSTART **+ → 5V**
-- **RDY boşta kalır** (tek sinyallik modül; ön-vakum yazılımda).
+- **RDY boşta kalır** (tek sinyallik modül; ayrı ön-vakum fazı yok — türbin RUN'da 250 ms rampalı).
 
 Kontrol: bağladıktan sonra, güç vermeden, multimetreyle Sinyal–GND ve +5V–GND arasında kısa devre olmadığını doğrula.
 
@@ -109,7 +109,7 @@ Kurallar: tek seferde tek parametre değişir; başarısız koşular da not edil
 ## 8. Günün başarı ölçütü (gerçekçi)
 
 1. Debug tüm testler geçti.
-2. MEBSTART: START→ön-vakum→koşu, STOP→fren→kilit; hepsi masada ve pistte doğrulandı.
+2. MEBSTART: START→koşu (ayrı ön-vakum fazı yok; türbin 250 ms rampa), STOP→fren→kilit; hepsi masada ve pistte doğrulandı.
 3. PWM 60–100 bandında **en az 1 tam tur** (kesiksiz veya bantlı bölümle).
 4. En az 5 kayıtlı koşu + 1 video.
 

@@ -346,10 +346,10 @@ Canli test cikis: SW1+SW2 2sn (turbinde SW2).
 | T5.3 | Kalibrasyon sırasında hangi LED çakıyor? → `Sensors.ino:152-154`: **LED0+LED1** = ters (siyah mod); **yalnız LED2** = ters değil (beyaz mod) | LED deseni (mod kanıtı) |
 | T5.4 | Robotu çizgi üzerinde 3-4 kez soldan sağa salla, butonla bitir | Kapı geçti mi? Geçmediyse LED0/LED1 hızlı çakma = kalibrasyon hatası |
 | T5.5 | ARMED: LED0 0.5 sn'de bir yanıyor mu? SW1 ile **PWM 60**'a düş | ARMED görüldü mü, PWM kaç |
-| T5.6 | ARMED'da MEBSTART START ver | Önce **1 sn türbin rampası** (LED2 hızlı çakma), sonra tekerlekler |
+| T5.6 | ARMED'da MEBSTART START ver | Türbin **250 ms** rampayla çıkar, tekerlekler **aynı anda** 150 ms rampayla kalkar (ayrı ön-vakum fazı yok); koşuda LED'ler sabit yanar |
 | T5.7 | Koşu (PWM 60), ilk 1-2 tur, video | Video dosya adı |
-| T5.8 | Kaçış/tur sonu | Robot **kendi kendine mi durdu** (çizgi kaybından ~0.4–0.9 sn sonra; `RunControl.ino:311` failsafe) yoksa STOP/kilit ile mi? |
-| T5.9 | Durduktan sonraki LED deseni | **LED0+LED1 1 sn arayla** = kilit (reset gerekir, `RunControl.ino:364-371`) |
+| T5.8 | Kaçış/tur sonu | Robot **kendi kendine mi durdu** (kendi duruşlar: düz kesikte 250 ms, viraj aramasında ~300 ms, üst güvenlik ağında 800 ms + 500 ms fren — `RunControl.ino:495`) yoksa STOP/kilit ile mi? |
+| T5.9 | Durduktan sonraki LED deseni | **LED0+LED1 1 sn arayla** = kilit (reset gerekir, `RunControl.ino:590-608`) |
 | T5.10 | Süre/sıcaklık | Açık kalma ≤45 sn, gövde sıcak mı |
 
 **Yorum rehberi:**
@@ -387,7 +387,7 @@ T4 TÜRBİN
 
 T5 YARIŞ KOŞUSU
   seçilen buton: ___ | kalibrasyon LED'i: [LED0+LED1 / yalnız LED2]
-  PWM: ___ | START sonrası 1 sn rampa: [görüldü/görülmedi]
+  PWM: ___ | START sonrası türbin 250 ms rampa (tekerlekle aynı anda): [görüldü/görülmedi]
   çıkış: [kendiliğinden durdu / STOP / hiç durmadı] | LED deseni: ___
   video: ___
 ```
