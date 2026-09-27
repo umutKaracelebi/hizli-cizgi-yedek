@@ -1,14 +1,5 @@
 /*
-  Sensors.ino - module code for ATLAS series
-
-    Created on: Mar, 2026
-    Edited by Mauricio Tovar
-    
-    ATLAS 1.4.3 © 2026 by EXOTIC TEAM MX is licensed under Creative Commons
-    Attribution-NonCommercial-NoDerivatives 4.0 International. To view a copy of
-    this license, visit https://creativecommons.org/licenses/by-nc-nd/4.0/
-
-  This code is part of the ATLAS_1.4.3.ino original firmware.
+  Sensors.ino - module code for ATLAS series / Antigravity Version
 */
 
 #define ADC_CHANNEL_4 0b0100
@@ -78,52 +69,41 @@ void readSampledSensors() {
   }
 
   for (byte j = 0; j < CALIBRATION_AVG_SAMPLES; j++) {
-    // update raw sensor values
     readRawSensors();
 
-    // add readings to sum of each sensor
     for (byte i = 0; i < TOTAL_SENSORS; i++) {
       sumSensorValues[i] += sensorValues[i];
     }
   }
 
-  // update sensor values with sum average
   for (byte i = 0; i < TOTAL_SENSORS; i++) {
     sensorValues[i] = sumSensorValues[i] / CALIBRATION_AVG_SAMPLES;
   }
 }
 
 void updateMaxMinSensorValues() {
-  byte highestSample[TOTAL_SENSORS];  // temporal highest collector sample for each sensor
-  byte lowestSample[TOTAL_SENSORS];   // temporal lowest collector sample for each sensor
+  byte highestSample[TOTAL_SENSORS];
+  byte lowestSample[TOTAL_SENSORS];
 
-  // samples collector
   for (byte j = 0; j < CALIBRATION_COLLECTOR_SAMPLES; j++) {
     readSampledSensors();
 
     for (byte i = 0; i < TOTAL_SENSORS; i++) {
-      // update maximum collected value
       if ((j == 0) || (sensorValues[i] > highestSample[i])) {
         highestSample[i] = sensorValues[i];
       }
 
-      // update minimum collected value
       if ((j == 0) || (sensorValues[i] < lowestSample[i])) {
         lowestSample[i] = sensorValues[i];
       }
     }
   }
 
-  // update the min and max values
   for (byte i = 0; i < TOTAL_SENSORS; i++) {
-    // update maximum only if the min of all collected readings was still higher than it
-    // (we got all collected readings in a row higher than the existing maximum)
     if (lowestSample[i] > maxSensorValues[i]) {
       maxSensorValues[i] = lowestSample[i];
     }
 
-    // update minimum only if the max of all collected readings was still lower than it
-    // (we got all collected readings in a row lower than the existing minimum)
     if (highestSample[i] < minSensorValues[i]) {
       minSensorValues[i] = highestSample[i];
     }
@@ -147,7 +127,7 @@ void calibrateSensors() {
 
   bool led_flag = true;
 
-  //  end calibration trigger
+  // Kalibrasyon örneklemesi döngüsü: SW1 veya SW2'ye basılana kadar robotu çizgide gezdir
   while (!readButton_1() && !readButton_2()) {
     setLED_0(invertSensorReads ? led_flag : 0);
     setLED_2(invertSensorReads ? 0 : led_flag);
@@ -156,6 +136,11 @@ void calibrateSensors() {
 
     updateMaxMinSensorValues();
   }
+
+  // Butonun bırakılmasını bekle
+  while (readButton_1() || readButton_2())
+    delay(10);
+  delay(150);
 
   getSensorThreshold();
   setLEDS(0);
@@ -170,10 +155,6 @@ void getSensorThreshold() {
   }
 }
 
-// TEAM: kalibrasyon kapisi. Her sensor icin (max-min) kontrasti en az
-// CAL_MIN_CONTRAST olmali; yoksa kalibrasyon gecersiz sayilir ve run()
-// baslamaz. (Buton basiliyken orneklemin atlanmasi veya hic salinim
-// yapilmamasi gibi basarisiz kalibrasyonla kosa cikmayi onler.)
 bool calibrationValid() {
   for (byte i = 0; i < TOTAL_SENSORS; i++) {
     if ((int)maxSensorValues[i] - (int)minSensorValues[i] < CAL_MIN_CONTRAST) {
@@ -184,7 +165,6 @@ bool calibrationValid() {
 }
 
 void readCalibratedSensors() {
-  // update actual raw sensor readings
   readRawSensors();
 
   for (byte i = 0; i < TOTAL_SENSORS; i++) {
@@ -192,35 +172,33 @@ void readCalibratedSensors() {
 
     if (sensorValues[i] > sensorThreshold[i]) {
       if (sensorValues[i] < maxSensorValues[i]) {
-        // scale value to fixed range if raw sensor value is higher than threshold and lower than maximum
         sensorValues[i] = ((uint32_t)(sensorValues[i] - sensorThreshold[i]) * ADC_MAX_VALUE) / range;
       } else {
-        sensorValues[i] = ADC_MAX_VALUE;  // set to 255 if raw sensor value is higher than maximum calibrated value
+        sensorValues[i] = ADC_MAX_VALUE;
       }
     } else {
-      sensorValues[i] = 0;  // set to zero if raw sensor value is lower than threshold
+      sensorValues[i] = 0;
     }
   }
 }
 
 unsigned int getLinePosition() {
-  uint32_t wtd = 0;  // temporal sum of weighted sensor values
-  uint32_t sum = 0;  // temporal sum of sensor values
-  isOnLine = false;  // set line is not on sensors range at the start of line position calculation
+  uint32_t wtd = 0;
+  uint32_t sum = 0;
+  isOnLine = false;
+  activeSensorsCount = 0;
 
-  // get calibrated sensor read values
   readCalibratedSensors();
 
   for (byte i = 0; i < TOTAL_SENSORS; i++) {
-    // add to sum if actual sensor value is higher to zero
     if (sensorValues[i]) {
-      isOnLine = true;  // updates to true if at least one sensor detects the line
+      isOnLine = true;
+      activeSensorsCount++;
       wtd += (uint32_t)sensorValues[i] * i * 1000;
       sum += sensorValues[i];
     }
   }
 
-  // if weighted sum is higher to zero return weighted average
   return wtd ? wtd / sum : 0;
 }
 
@@ -254,10 +232,6 @@ void readOtherADCs() {
 
   setADCChannel(LINE_SENSORS_ADC_CHANNEL);
 }
-
-//  ======================
-//  D E B U G   T O O L S
-//  ======================
 
 void printSensorValues() {
   for (byte i = 0; i < TOTAL_SENSORS; i++) {

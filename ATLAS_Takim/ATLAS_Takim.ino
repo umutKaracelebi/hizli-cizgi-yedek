@@ -1,25 +1,24 @@
 /*
-  ATLAS_Takim.ino - Team Turquoise yaris surumu
+  ATLAS_Takim.ino - Hızlı Çizgi İzleyen Robot (Team Antigravity Sürümü)
   Taban: ATLAS 1.4.3 (c) 2026 EXOTIC TEAM MX, CC BY-NC-ND 4.0
-  Lisans: yalniz takim ici kullanim; yayinlanamaz.
-
-  TEAM TURQUOISE degisiklikleri (2026-09-22):
-   1) RunControl.ino: offlineElapsedTime kendini-okuma hatasi duzeltildi
-      (offlineStartTime referansi) - DERLEYICI UYARISI GIDERILDI.
-   2) MEBSTART entegrasyonu: GO (D4) aktif-LOW (bekleme 5V, START'ta 0V).
-      START kenari -> 1 sn on-vakum -> kosu.
-      STOP = sinyalin 5V'a donmesi (30 ms teyit) veya SW1+SW2 cift basim.
-      500 ms kontrollu fren sonrasi reset'e kadar kilit.
-      On-vakum sirasinda STOP gelirse turbin kapanir, ARMED'a donulur.
-   3) Kesikli cizgi: cizgi kaybinda ilk OFFLINE_GAP_BRIDGE_MS boyunca
-      ayni hizda duz devam (kopru); sonra ureticinin kurtarma manevrasi.
-   4) OFFLINE_FAILSAFE_MS: cizgi bu sureden uzun kaybolursa robot
-      kendini guvenli durusa alir (bos arazide sonsuz tur atmaz).
-   5) Kalibrasyon kapisi: kontrasti dusuk sensor varsa run'a girilmez
-      (CAL_MIN_CONTRAST). LED0/LED1 hizli cakim = kalibrasyon hatasi.
-   6) debugMode() bu surumden CIKARILDI; donanim testleri icin ayri
-      ATLAS_Debug sketch'i kullanilir. Boylece SRAM boslugu artar
-      (uretici surumunde 1557/2048 B idi; String/String-birlestirme yok).
+  
+  ANTIGRAVITY DÜZELTMELERİ (2026-09-24):
+   1) MEBSTART Entegrasyonu ve Kararlı Kenar Algılama (Edge-Detection):
+      - START_SIGNAL_CONFIRM_MS = 60 ms ile elektriksel gürültü ve buton arkı koruması.
+      - Sinyalin önce stabil 5V olduğu doğrulanır; 5V -> 0V düşen kenar şart koşulur.
+   2) 1 Saniye Kesintisiz Ön Vakum (Pre-Vacuum):
+      - Kumandaya 1. basışta önce motor sürücüsü donanımsal olarak uyandırılır (INH = 1).
+      - Tekerlekler 1 saniye boyunca kesinlikle 0 PWM'de beklerken tribün tam devrine ulaşır.
+      - 1 saniye dolunca tribün hiç kesilmeden tekerleklerle koşu (RUN) başlar.
+   3) Koşu Boyunca Kesintisiz Vakum Güvencesi:
+      - Çizgi dışına (offline / köprü) çıkılsa dahi tribün PWM'i asla sıfırlanmaz.
+   4) Kumandaya 2. Basışta Kontrollü Frenleme ve KALICI KİLİT (Permanent Lockout):
+      - 2. basışta 500 ms kontrollü aktif fren uygulanır.
+      - Tekerlekler ve tribün tamamen kapatılır; sürücüler uyutulur (INH = 0).
+      - Robot sonsuz döngüde kilitlenir; 3., 4. vb. sonraki basışlar kesinlikle çalışmaz.
+   5) Buton Bırakma (Debounce) ve Kalibrasyon Akış Koruması:
+      - Butonlara basıldıktan sonra parmak çekilene kadar beklenir; bir önceki basış
+        sonraki menüye veya starta sıçramaz.
 */
 
 //  =============================
@@ -60,6 +59,12 @@ const bool areMotorsEnabled = true;
 
 #define OFFLINE_OUTTER_MOTOR_PWM CONTROL_MAX_PWM_FORWARD
 #define OFFLINE_INNER_MOTOR_PWM CONTROL_MAX_PWM_BACKWARD
+// NOT (TEAM, 25 Eylul 2026): yukaridaki iki PWM ve asagidaki fren suresi
+// URETICININ eski kurtarma manevrasi icindir ve artik KULLANILMIYOR.
+// Yerine "T E A M   P A R A M E T R E L E R I" bolumundeki siniflandirmali
+// kopru + SINIRLI yerinde donuslu arama + gecici takip mantigi gecti
+// (OFFLINE_SEARCH_PWM, OFFLINE_SEARCH_FIRST_MS, OFFLINE_SEARCH_MAX_MS).
+// Referans icin birakildi.
 
 // OTHERS
 #define SENSORS_THRESHOLD_PCT 50
@@ -67,18 +72,90 @@ const bool areMotorsEnabled = true;
 //  =================================
 //  T E A M   P A R A M E T E R L E R I
 //  =================================
-// (Yalniz takim surumunde var; piste gore ayarlanir.)
 
-// MEBSTART sinyal teyit sureleri (gurultu/sacaklanma filtresi)
-#define START_SIGNAL_CONFIRM_MS 20  // START: LOW bu sure surekli gorulurse gecerli
-#define STOP_SIGNAL_CONFIRM_MS 30   // STOP: HIGH bu sure surekli gorulurse gecerli
+// MEBSTART sinyal teyit süreleri (gürültü / buton arkı filtresi)
+#define START_SIGNAL_CONFIRM_MS 60   // START: 0V en az bu süre stabil kalırsa geçerli
+#define STOP_SIGNAL_CONFIRM_MS 150   // STOP: 5V en az bu süre stabil kalırsa geçerli (motor titreşim koruması)
 
-// Kesik/catlak gecme: cizgi kaybolunca ilk bu kadar ms ayni hizda duz devam
-#define OFFLINE_GAP_BRIDGE_MS 60
-// Cizgi bu sureden uzun kaybolursa guvenli durus (failsafe)
-#define OFFLINE_FAILSAFE_MS 400
+// ---------------------------------------------------------------------
+// CIZGI KAYBI YONETIMI (kesikli cizgi / keskin donus ayrimi)
+// ---------------------------------------------------------------------
+// SAHA GERI BILDIRIMI (27 Eyl 2026, pist 1 beyaz kesik cizgileri):
+// Onceki surumde (120 ms kopru + azalan direksiyon tutma + sinirsiz
+// iki yonlu arama) robot kesikte bazen duz geciyor, bazen zikzak
+// ciziyor, bazen geldigi cizgiye GERI DONUYOR, bazen de kesikten
+// saga sapip pist disina cikiyordu. Koki nedenler:
+//   1) 120 ms kopru gercek bosluk suresinden kisa kalabiliyordu
+//      (orta hizda 56 mm bosluk ~160 ms); kopru BOSLUGUN ORTASINDA
+//      dolunca yerinde donuslu arama beyaz alanda basliyor, robot
+//      180 derece donup arkadaki kesik parcasina kilitleniyordu.
+//   2) Kopru boyunca kayip anindaki son PID degeri (turev darbesi
+//      dahil) +-80'e kadar tutuluyordu -> robota yanal sapma.
+//   3) Yeniden yakalamada tek donguluk turev sifirmasi yeterli
+//      degildi; sonraki dongude konum sicalamasi buyuk D darbesi
+//      uretiyor -> kesikte zikzak.
+//   4) Siniflandirma, darbeli ani linePWM'e bakiyordu.
+//
+// GECERLI TASARIM:
+//   - Kayip ani, SONULMIS direksiyon (EMA) ve son konumla siniflanir.
+//   - DUZ KESIK: direksiyon tamamen sifirlanarak DUZ kor devam; bu
+//     pencerede asla donus/arama yapilmaz. Devam cizgisi merkez
+//     bandinda gorunurse kabul; bant disinda KALICI cizgi gorunurse
+//     (gercek egri / 90 derece zikzak sonrasi parca) kisa bir kalicilik
+//     suresi sonunda kabul edilir. Bosluk pencereyi asarsa guvenli durus.
+//   - KESKIN DONUS: kisa kopru -> sinirli sureli yerinde arama
+//     (ilk faz kaybedilen yone kisa, sonra bir kez ters yon; toplam
+//     butce asilirsa guvenli durus). Boylece 180+ derece donup geri
+//     kilitlenme engellenir.
+//   - Her yeniden yakalamadan sonra kisa bir "yumusatma" penceresi:
+//     direksiyon duzeltmesi sinirlanir (zikzak/darbe onlemi).
 
-// Kalibrasyon kapisi: her sensorde (max-min) en az bu kadar olmali (0..255 olcek)
+// Kayip ani siniflandirmasi
+// Ayrut esasi KONUM: duz kesikte cizgi kaybolmadan once merkezdedir;
+// keskin donus/kose cikisinda bar kenara kaymistir. Direksiyon olcutu
+// yalnizca "susturulmus sert pivot"u yakalamak icindir; tek donguluk
+// turev darbeleri (sahadaki zikzak hali) +-400'e kirpilip 1/4 EMA'dan
+// gectigi icin birkac dongude ~200'u asamaz -> 300 esigi guvenli ayirir.
+#define LINE_CENTER_POSITION 7500        // 0..15000 olceginde merkez degeri
+#define OFFLINE_DASH_CENTER_BAND 3500    // |sonulmus konum - merkez| bu bant icindeyse "merkezden kayip"
+#define OFFLINE_DASH_STEER_MAX 300       // |sonulmus direksiyon| bunun altindaysa "pivot yapmiyordu"
+
+// Kopru (kor devam) sureleri
+#define OFFLINE_GAP_BRIDGE_MS 15         // Donus/keskin kose: kisa kor devam
+#define OFFLINE_DASH_COAST_MS 250        // Duz kesikli cizgi: DUZ kor devam penceresi
+
+// Yeniden yakalama kapilari
+#define OFFLINE_DASH_REACQUIRE_BAND 4500 // Kesik sonrasi devam cizgisi bu bantta beklenir
+#define OFFLINE_MIN_CONFIRM_LOOPS 4      // Yeniden yakalama icin ardisik dongu teyidi
+#define OFFLINE_DASH_SIDE_CONFIRM_MS 40  // Kesikte bant disi ama KALICI cizgi = gercek egri
+
+// Yeniden yakalama sonrasi yumusatma (kesik zikzagi / darbe onlemi)
+#define REACQUIRE_DAMP_MS 100            // Yumusatma penceresi suresi
+#define REACQUIRE_STEER_CLAMP 150        // Pencerede en fazla |direksiyon duzeltmesi|
+
+// Arama manevrasi (keskin donus; kisa kopru dolduktan sonra, cizgi hala yok)
+// Yerinde donus: dis teker +PWM, ic teker -PWM -> robot ileri kacmaz.
+// (27 Eyl saha) Iki yonlu fazlar SONSUZA kadar surebiliyordu; robot 180+
+// derece donup geldigi cizgiye kilitleniyordu ("oldugu cizgiden geri dondu").
+// Gecerli tasarim:
+//  - Once kaybedilen yone KISA tek faz, sonra TEK ters faz; toplam butce
+//    SEARCH_MAX ile sinirlidir, asilirsa guvenli durus (asla geri donmez).
+//  - Arama sirasinda bir cizgi gorunurse hemen kilitlenilmez: kisitli
+//    duzeltmeyle "gecici takip" baslar ve ancak temas SEARCH_TRACK_MS
+//    boyunca kesintisiz surerse kabul edilir. Arkadan/egik kisa temaslar
+//    (eski geri kilitlenme arizasi) bu sayede elenir.
+#define OFFLINE_SEARCH_PWM 120           // Arama donus siddeti (simetrik)
+#define OFFLINE_SEARCH_FIRST_MS 100      // Ilk yonde (kaybedilen tarafa) arama suresi
+#define OFFLINE_SEARCH_MAX_MS 280        // Toplam arama butcesi; sonra fren + kilit
+#define OFFLINE_SEARCH_TRACK_MS 60       // Gecici takipte kesintisiz temas teyidi
+
+// Her durumda ust guvenlik agi (fren + kalici kilit)
+#define OFFLINE_FAILSAFE_MS 800
+
+// Kesişim / loop geçiş köprüsü: dikey çizgi kesişiminden düz geçiş hold süresi (ms)
+#define INTERSECTION_HOLD_TIME_MS 50
+
+// Kalibrasyon kapısı: her sensörde (max - min) en az bu kadar olmalı (0..255 ölçek)
 #define CAL_MIN_CONTRAST 30
 
 //  =====================================================
@@ -88,6 +165,7 @@ const bool areMotorsEnabled = true;
 // sensors
 #define TOTAL_SENSORS 16
 byte sensorValues[TOTAL_SENSORS];
+byte activeSensorsCount = 0;
 bool invertSensorReads = false;
 byte ADC6_value;
 byte ADC7_value;
@@ -106,23 +184,25 @@ void setup() {
 
   bootAnimation();  // boot display animation
 
-  // TEAM NOTU: debugMode bu surumde yok; donanim testi icin ATLAS_Debug
-  // sketch'i yuklenir. Burada dogrudan normal akisa gecilir.
-
   //  ===================
   //  I D L E   S T A T E
   //  ===================
 
+  // SW1 veya SW2 basılana kadar bekle
   while (!readButton_1() && !readButton_2())
     ;
 
-  invertSensorReads = readButton_2();  // SW2 = SİYAH cizgi (bizim pist); SW1 = beyaz cizgi modu
+  invertSensorReads = readButton_2();  // SW2 = Siyah çizgi / Beyaz zemin; SW1 = Beyaz çizgi modu
+
+  // GÜVENLİK: Basılan buton bırakılana kadar bekle (kalibrasyona sıçramayı önler)
+  while (readButton_1() || readButton_2())
+    delay(10);
+  delay(150);
 
   calibrateSensors();
 
-  // TEAM: kalibrasyon kapisi — yetersiz kontrastta run'a girme
+  // Kalibrasyon kapısı — yetersiz kontrast varsa kilitlen
   if (!calibrationValid()) {
-    // Hizli LED0/LED1 cakimi = kalibrasyon hatasi; reset gerekir.
     while (1) {
       setLED_0(1);
       setLED_1(0);
@@ -133,7 +213,10 @@ void setup() {
     }
   }
 
-  delay(250);
+  // GÜVENLİK: Kalibrasyonu bitiren butonun bırakılmasını bekle
+  while (readButton_1() || readButton_2())
+    delay(10);
+  delay(200);
 
   run();
 }

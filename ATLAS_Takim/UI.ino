@@ -1,27 +1,26 @@
 /*
-  UI.ino - module code for ATLAS series
-
-    Created on: Mar, 2026
-    Edited by Mauricio Tovar
-    
-    ATLAS 1.4.3 © 2026 by EXOTIC TEAM MX is licensed under Creative Commons
-    Attribution-NonCommercial-NoDerivatives 4.0 International. To view a copy of
-    this license, visit https://creativecommons.org/licenses/by-nc-nd/4.0/
-
-  This code is part of the ATLAS_1.4.3.ino original firmware.
+  UI.ino - module code for ATLAS series / Antigravity Version
 */
 
 void UIInit() {
-  DDRD |= 1 << DDD2;     //  set PD2 as LED_0 digital output
-  DDRB |= 1 << DDB0;     //  set PB0 as LED_1 digital output
-  DDRB |= 1 << DDB5;     //  set PB5 as LED_2 digital output
-  PORTC |= 1 << PORTC5;  //  enable PC5 as button_1 pull-up input
-  PORTD |= 1 << PORTD7;  //  enable PD7 as button_2 pull-up input
+  // LED Çıkışları
+  DDRD |= 1 << DDD2;     // set PD2 as LED_0 digital output
+  DDRB |= 1 << DDB0;     // set PB0 as LED_1 digital output
+  DDRB |= 1 << DDB5;     // set PB5 as LED_2 digital output
 
-  // TEAM: MEBSTART pinlerine dahili pull-up. Modul takili degilse veya
-  // kablo koparsa pinler HIGH okunur = "bekleme/STOP" = guvenli yon.
-  PORTD |= 1 << PORTD3;  //  PD3 = READY pini (su an kullanilmiyor)
-  PORTD |= 1 << PORTD4;  //  PD4 = GO pini = MEBSTART sinyali (aktif-LOW)
+  // Buton Girişleri (Pull-up ile)
+  DDRC &= ~(1 << DDC5);  // set PC5 as input (button_1)
+  PORTC |= 1 << PORTC5;  // enable PC5 pull-up
+
+  DDRD &= ~(1 << DDD7);  // set PD7 as input (button_2)
+  PORTD |= 1 << PORTD7;  // enable PD7 pull-up
+
+  // MEBSTART Sinyal Girişleri (Pull-up ile)
+  DDRD &= ~(1 << DDD3);  // set PD3 as input (READY)
+  PORTD |= 1 << PORTD3;  // enable PD3 pull-up
+
+  DDRD &= ~(1 << DDD4);  // set PD4 as input (GO / MEBSTART sinyali)
+  PORTD |= 1 << PORTD4;  // enable PD4 pull-up
 }
 
 bool readButton_1() {
@@ -40,16 +39,15 @@ bool readGo() {
   return PIND & (1 << PIND4);
 }
 
-// TEAM: MEBSTART yardimcilari.
-// Modul beklemede 5V (HIGH), START/STOP komutunda 0V (LOW) uretir.
-//   readStartIdle()  = true -> sinyal beklemede (HIGH). START yok / STOP geldi.
-//   startSignalLow() = true -> START ya da on-vakum aninda (LOW).
+// MEBSTART Durum Fonksiyonları:
+// Beklemede / STOP anında modül 5V (HIGH) verir.
+// START verildiğinde modül 0V (LOW) verir.
 bool readStartIdle() {
-  return PIND & (1 << PIND4);  // HIGH = bekleme
+  return (PIND & (1 << PIND4)) != 0;  // HIGH (5V) = Bekleme / STOP
 }
 
 bool startSignalLow() {
-  return !(PIND & (1 << PIND4));  // LOW = aktif
+  return !(PIND & (1 << PIND4));      // LOW (0V) = Aktif START
 }
 
 void setLED_0(bool _state) {

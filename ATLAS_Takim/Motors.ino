@@ -1,14 +1,5 @@
 /*
-  Motors.ino - module code for ATLAS series
-
-    Created on: Mar, 2026
-    Edited by Mauricio Tovar
-    
-    ATLAS 1.4.3 © 2026 by EXOTIC TEAM MX is licensed under Creative Commons
-    Attribution-NonCommercial-NoDerivatives 4.0 International. To view a copy of
-    this license, visit https://creativecommons.org/licenses/by-nc-nd/4.0/
-
-  This code is part of the ATLAS_1.4.3.ino original firmware.
+  Motors.ino - module code for ATLAS series / Antigravity Version
 */
 
 #define INH 12
@@ -50,7 +41,7 @@ void motorsInit() {
   digitalWrite(INL1, 0);
   digitalWrite(INR1, 0);
 
-  // Timer 1 configuration
+  // Timer 1 configuration (Motor PWM)
   TCCR1A = _BV(COM1A1) | _BV(COM1B1) | _BV(WGM11);
   TCCR1B = _BV(WGM13) | _BV(CS10);
 
@@ -58,7 +49,7 @@ void motorsInit() {
   OCR1A = 0;
   OCR1B = 0;
 
-  // Timer 2 configuration
+  // Timer 2 configuration (Impeller PWM)
   TCCR2A = _BV(COM2A1) | _BV(WGM20);
   TCCR2B = _BV(CS20);
 
@@ -76,6 +67,7 @@ void disableMotorDrivers() {
   digitalWrite(INR1, 0);
   OCR1A = 0;
   OCR1B = 0;
+  OCR2A = 0;
   delayMicroseconds(T_STBY_US);
 }
 
