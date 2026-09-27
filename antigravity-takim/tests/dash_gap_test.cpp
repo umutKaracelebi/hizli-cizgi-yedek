@@ -27,7 +27,7 @@
   Derleme ve kosum (proje kokunde; g++ veya clang++ gerekir)
   ---------------------------------------------------------
     g++ -std=c++11 -Wall -Wextra -pedantic -o atlas_dash_test.exe ^
-        ATLAS_Takim/antigravity-takim/tests/dash_gap_test.cpp
+        antigravity-takim/tests/dash_gap_test.cpp
 */
 
 #include "stubs/Arduino.h"

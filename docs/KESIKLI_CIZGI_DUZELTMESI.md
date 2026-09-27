@@ -1,6 +1,6 @@
 # Kesikli çizgi (dash) geçiş sorunu — inceleme ve düzeltme
 
-Tarih: 25 Eylül 2026. Kapsam: `ATLAS_Takim/antigravity-takim/` kodu. Bu belge, sahada bildirilen "beyaz kesikli çizgiye gelince robot sapıtıyor" sorununun kök nedenlerini, uygulanan yazılım düzeltmesini ve sahada doğrulama planını kaydeder.
+Tarih: 25 Eylül 2026. Kapsam: `antigravity-takim/` kodu. Bu belge, sahada bildirilen "beyaz kesikli çizgiye gelince robot sapıtıyor" sorununun kök nedenlerini, uygulanan yazılım düzeltmesini ve sahada doğrulama planını kaydeder.
 
 > Statik inceleme + hedef karta derleme + masaüstü kontrol-mantığı derlemesi yapıldı. **Gerçek robotta/pistte doğrulama henüz yapılmadı.**
 
@@ -111,7 +111,7 @@ Sürüş (PD) katsayıları, hız seçimi (60–250 PWM), türbin PWM'i ve kalib
 
 ```powershell
 $cli = "$env:LOCALAPPDATA\Programs\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe"
-& $cli compile --fqbn arduino:avr:nano --warnings all ATLAS_Takim/antigravity-takim
+& $cli compile --fqbn arduino:avr:nano --warnings all antigravity-takim
 ```
 
 - Düzeltme **öncesi**: derlenmiyor (K1'deki hatalar).
@@ -119,12 +119,12 @@ $cli = "$env:LOCALAPPDATA\Programs\Arduino IDE\resources\app\lib\backend\resourc
 
 ### 5.2 Masaüstü kontrol-mantığı testi (hazır, koşturulmadı)
 
-Dosyalar: `ATLAS_Takim/antigravity-takim/tests/dash_gap_test.cpp`, `tests/atlas_prototypes.h`, `tests/stubs/Arduino.h`.
+Dosyalar: `antigravity-takim/tests/dash_gap_test.cpp`, `tests/atlas_prototypes.h`, `tests/stubs/Arduino.h`.
 Test, gerçek `.ino` sekmelerini olduğu gibi dahil eder; Arduino/AVR katmanını taklit ederek `updatePeriod()` döngüsünü adım adım koşturur.
 
 ```powershell
 g++ -std=c++11 -Wall -Wextra -pedantic -o "$env:TEMP\atlas_dash_test.exe" `
-    ATLAS_Takim/antigravity-takim/tests/dash_gap_test.cpp
+    antigravity-takim/tests/dash_gap_test.cpp
 if ($LASTEXITCODE -eq 0) { & "$env:TEMP\atlas_dash_test.exe" }
 ```
 
@@ -143,7 +143,7 @@ if ($LASTEXITCODE -eq 0) { & "$env:TEMP\atlas_dash_test.exe" }
 
 ## 6. Sahada doğrulama planı
 
-Her adımda tek değişken; sonuçlar [test ve yarışma planı §7](TEST_VE_YARISMA_PLANI.md) kayıt şablonuna yazılır. Koşu öncesi: `ATLAS_Takim/antigravity-takim/antigravity-takim.ino` + 4 sekme birlikte yüklenir (tek `.ino` gönderme hatası tekrarlanmaz).
+Her adımda tek değişken; sonuçlar [test ve yarışma planı §7](TEST_VE_YARISMA_PLANI.md) kayıt şablonuna yazılır. Koşu öncesi: `antigravity-takim/antigravity-takim.ino` + 4 sekme birlikte yüklenir (tek `.ino` gönderme hatası tekrarlanmaz).
 
 | Adım | Ayar | Gözlenecek |
 |---|---|---|
@@ -165,9 +165,9 @@ Her adımda tek değişken; sonuçlar [test ve yarışma planı §7](TEST_VE_YAR
 
 ## 8. Değişen ve eklenen dosyalar
 
-- `ATLAS_Takim/antigravity-takim/antigravity-takim.ino` — kesik/dönüş parametreleri yeniden düzenlendi.
-- `ATLAS_Takim/antigravity-takim/RunControl.ino` — kopyalanmış bozuk blok silindi; kayıp sınıflandırması, köprü, yerinde dönüşlü arama, yeniden yakalama kapısı ve türev darbesi düzeltmesi eklendi.
-- `ATLAS_Takim/antigravity-takim/tests/` — **yeni**: `dash_gap_test.cpp`, `atlas_prototypes.h`, `stubs/Arduino.h`. `tests/` alt klasörü Arduino derlemesine dahil edilmez (doğrulandı: sketch yine sorunsuz derleniyor).
+- `antigravity-takim/antigravity-takim.ino` — kesik/dönüş parametreleri yeniden düzenlendi.
+- `antigravity-takim/RunControl.ino` — kopyalanmış bozuk blok silindi; kayıp sınıflandırması, köprü, yerinde dönüşlü arama, yeniden yakalama kapısı ve türev darbesi düzeltmesi eklendi.
+- `antigravity-takim/tests/` — **yeni**: `dash_gap_test.cpp`, `atlas_prototypes.h`, `stubs/Arduino.h`. `tests/` alt klasörü Arduino derlemesine dahil edilmez (doğrulandı: sketch yine sorunsuz derleniyor).
 - `docs/KESIKLI_CIZGI_DUZELTMESI.md` — bu belge.
 - `Motors.ino`, `Sensors.ino`, `UI.ino` — değişmedi.
 
