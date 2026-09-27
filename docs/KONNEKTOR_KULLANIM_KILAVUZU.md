@@ -94,7 +94,7 @@ PC (USB) ── USBasp ── 10 pin şerit ── 10→6 adaptör ── Robot 
 - MEBSTART **Sinyal → GO**, **−→ −**, **+ → +**. **RDY boşta kalır** (tek sinyal iki ayrı READY/GO üretemez; takım firmware'i READY'yi kullanmaz, ön-vakumu yazılımdan yapar).
 - Modülün IR alıcı penceresi robotun üstünde dışa dönük ve gölgelenmemiş olsun (kılavuz/şartname gereği).
 
-**Yazılım tarafı (ATLAS_Takim sürümünde hazır):** GO pini aktif-LOW okunur; START kenarı → 1 sn ön-vakum → koşu; STOP (sinyalin 5 V'a dönmesi) → 500 ms fren → kilit (reset'e kadar). Ek emniyet: SW1+SW2'ye birlikte basmak her an STOP'tur.
+**Yazılım tarafı (ATLAS_Takim sürümünde hazır):** GO pini aktif-LOW okunur; START kenarı → yumuşak kalkış (tribün 250 ms / tekerlek 150 ms rampa) → koşu; STOP (sinyalin 5 V'a dönmesi) → 500 ms fren → kilit (reset'e kadar). Ek emniyet: SW1+SW2'ye birlikte basmak her an STOP'tur.
 
 ---
 

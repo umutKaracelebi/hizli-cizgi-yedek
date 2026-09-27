@@ -70,14 +70,16 @@ Robot platformu, Meksika menşeli **ATLAS Rev. 1.4.3** (Exotic Team MX) şasisi 
 - MEBSTART uyumsuzluğu: 5 V bekleme sinyali doğrudan start olarak yorumlanır.
 
 ### 3.2. Takım Yarışma Sürümü (`ATLAS_Takim/`)
-- **P0 Hata Düzeltmesi:** `offlineElapsedTime = currentTime - offlineStartTime` yapılarak çizgi arama süresi deterministik kılındı.
-- **MEBSTART Entegrasyonu:** D4 pini aktif-LOW durum makinesine bağlandı. Sinyal beklemede 5 V (HIGH), START komutunda 0 V (LOW).
-- **Ön-Vakum Sıralaması:** START komutu algılandığında motorlar dururken türbin 1000 ms rampayla (`START_IMPELLER_RAMP_TIME_MS`) tam basınca ulaşır, ardından sürüş başlar. Ön-vakum sırasında STOP gelirse robot kalkmadan güvenle durur.
-- **Kesikli Çizgi Köprüsü (`OFFLINE_GAP_BRIDGE_MS = 60`):** Çizgi kaybedildiğinde ilk 60 ms boyunca robot son hızla düz devam eder; kesik bölgeyi atlar. Süre aşılırsa üretici arama manevrasına geçer.
-- **Güvenlik Koruması (`OFFLINE_FAILSAFE_MS = 400`):** 400 ms boyunca çizgi bulunamazsa robot kendi kendine 500 ms frenleme rampasıyla durur ve kilitlenir.
-- **Kalibrasyon Doğrulama Kapısı (`CAL_MIN_CONTRAST = 30`):** 16 sensörden herhangi biri açık/koyu arasında yeterli kontrast göremezse koşu başlatılmaz (LED0/LED1 hızlı çakar).
-- **Yüksek Bellek Kazancı:** Statik `debugMode()` kaldırılarak flash 6518 B'a, SRAM kullanımı **291 B'a (%14)** düşürüldü.
-- **Acil Durdurma:** Koşu sırasında SW1+SW2 butonlarına birlikte basıldığında donanımsal acil duruş devreye girer.
+- **Kumandalı Başlatma (MEBSTART):** D4 pini aktif-LOW durum makinesiyle okunur (WAIT_IDLE → ARMED → RUN). Gürültü/buton arkı için START 60 ms, STOP 150 ms stabilite teyidi uygulanır; koşu boyunca SW1+SW2 birlikte basılırsa anında durur.
+- **Kalkış Rampaları:** Tekerlekler 150 ms, tribün 250 ms yumuşak rampayla devreye girer; koşu boyunca tribün tam devirde kalır (asla sıfırlanmaz).
+- **Kesikli Çizgi Kör Devamı (`OFFLINE_DASH_COAST_MS = 250`):** Düz ilerlerken çizgi kaybolursa robot direksiyonsuz TAM DÜZ devam eder; beyaz boşlukta asla pivot/arama yapılmaz. Devam çizgisi merkez bandında (±36 mm) 4 ardışık döngüde yeniden kabul edilir; bant dışında ama 40 ms kesintisiz görünen çizgi gerçek eğri sayılır. Köprü aşılırsa güvenli fren.
+- **Sınırlı Dönüş Araması (`OFFLINE_SEARCH_*`):** Kenardan kayıp (keskin köşe) sınıflandırıldığında 15 ms köprü → 100 ms kaybedilen yöne + en fazla 180 ms ters yönde yerinde sınırlı arama → bulunamazsa fren. Arama sırasında görülen çizgiye doğrudan kilitlenilmez; 60 ms kesintisiz temas isteyen "geçici takip" elenmesi sayesinde geldigi çizgiye 180° geri kilitlenme engellenir.
+- **Yeniden Yakalama Yumuşatması:** Kabulden sonra 100 ms boyunca direksiyon düzeltmesi ±150 ile sınırlı (türev darbesi/zigzag önlenir).
+- **Mandallı Frenleme (27 Eylül saha düzeltmesi):** STOP/failsafe tetik anındaki gerçek tekerlek PWM'lerine mandallanır; 500 ms'de oradan sıfıra iner. Pivot/arama sırasında gelen STOP'ta robot artık ileri sıçramaz.
+- **Kesişim Üst Sınırı (`INTERSECTION_MAX_MS = 400`):** Tam siyah zemin (pist dışı/robot havada) sonsuz "kesişim" sayılıp failsafe'i ertelemesin diye üst sınır aşılınca güvenli duruş.
+- **Failsafe:** Kalıcı kayıpta `OFFLINE_FAILSAFE_MS = 800` üst güvenlik ağı → fren + kalıcı kilit (yeniden çalıştırma yalnızca kart resetiyle).
+- **Kalibrasyon Doğrulama Kapısı (`CAL_MIN_CONTRAST = 30`):** Yetersiz kontrastta koşu başlatılmaz (LED0/LED1 hızlı çakar).
+- Bellek (27 Eylül 2026 ölçümü, arduino-cli, `arduino:avr:nano`): flash **8328 B (%27)**, SRAM **324 B (%15)**.
 
 ### 3.3. Donanım Doğrulama Aracı (`ATLAS_Debug/`)
 Yarışma kodu yüklenmeden önce tüm alt sistemleri tek tek test eden bağımsız sketch (SRAM 204 B).
@@ -147,7 +149,7 @@ Yarışma pistimiz **beyaz zemin üzerine siyah çizgi** geometrisine sahiptir (
 [Yarışma Başlatma] ──► Hakem kumandasından START sinyali verilir
          │
          ▼
-[Ön-Vakum Aşaması] ──► 1 saniye türbin hızlanır (LED2 hızlı çakar, tekerlekler durur)
+[Yumuşak Kalkış] ──► Tribün 250 ms rampayla devreye girer, tekerlekler 150 ms rampayla kalkar
          │
          ▼
 [Otonom Koşu] ──► 750 µs PD döngüsü devrede, robot çizgiyi izler
@@ -156,7 +158,7 @@ Yarışma pistimiz **beyaz zemin üzerine siyah çizgi** geometrisine sahiptir (
 [Durdurma] ──► Hakem STOP sinyali VEYA robot üzerinden SW1+SW2
          │
          ▼
-[Frenleme & Kilit] ──► 500 ms dinamik frenleme rampa sonu motorlar kapanır
+[Frenleme & Kilit] ──► 500 ms fren (tetik anındaki PWM'den sıfıra), sonra motorlar kapanır
                        LED'ler 1 sn aralıkla çakar (Yeniden başlatmak için RESET tuşu)
 ```
 

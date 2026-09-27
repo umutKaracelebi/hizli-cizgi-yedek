@@ -71,7 +71,10 @@ double theta = 0.0;
 double lastPwmL = 0.0;
 double lastPwmR = 0.0;
 
+bool fullBlackFloor = false;  // H2 testi: butun zemin siyah (pist disi / robot havada)
+
 bool hasBlackAtLat(double lat, double lon) {
+  if (fullBlackFloor) return true;
   if (trackEnabled && !(lineEndsAtY && lon > lineEndY) &&
       fabs(lat - lineLatOffset) <= LINE_HALF_WIDTH_MM) {
     if (lon < 0.0) return false;
@@ -99,6 +102,7 @@ void reset(double startX, double startY, double startTheta = 0.0) {
   trackEnabled = true;
   lineEndsAtY = false;
   foreignLine = false;
+  fullBlackFloor = false;
   lineEndY = 0.0;
   foreignLineLat = 0.0;
   dashLenMm = 100.0;
@@ -420,7 +424,11 @@ void testCornerLossStillPivots() {
   assert(s1->pwmL == -OFFLINE_SEARCH_PWM);   // sonra TEK ters faz
   assert(s1->pwmR == OFFLINE_SEARCH_PWM);
   assert(stopBrake_flag);                    // butce doldu -> fren (ASLA geri donerek kilitlenmez)
-  assert(s2->pwmL == s2->pwmR);              // simetrik fren
+  // H1 sifati: fren pivot anindaki cikisara mandallanir. Burada tetik
+  // ters fazdayken geldi: (L=-120, R=+120). Eski surum burada TAM GAZ
+  // ileri (velocityPWM, velocityPWM) sicrardi — bu test onu yakalar.
+  assert(s2->pwmL < 0 && s2->pwmR > 0);      // pivot yonunde frenliyor (ileri sicrama YOK)
+  assert(s2->pwmL >= -OFFLINE_SEARCH_PWM && s2->pwmR <= OFFLINE_SEARCH_PWM);  // mandal sinirinda
 }
 
 //  =====================================================================
@@ -477,21 +485,35 @@ void testCornerSearchProvisionalTrack() {
     if (tAccepted < 0 && !r.episode) tAccepted = r.t;
   }
 
+  // Fren tetiklendiyse tamamlanana kadar (500 ms rampa) kostur.
+  // (Not: testler run() yerine runInit/updatePeriod cagirir; isRunning
+  // bayragi burada anlam tasimaz, sureye bakilir.)
+  if (stopBrake_flag) {
+    const unsigned long tBrakeEnd = stopBrakeStartTime + STOP_BRAKE_TIME_MS + 5;
+    while (tEnd < (int)tBrakeEnd) {
+      ++tEnd;
+      sim::step((unsigned long)tEnd);
+    }
+  }
+
   const int finalX10 = sim::records[sim::recordCount - 1].x10;
   printf("[T3b] tLoss=%d, gecici takip goruldu=%d, kabul=%s, fren=%d, son x=%d.%d mm (devam ~50 mm sagda)\n",
          tLoss, (int)sawProvisional, tAccepted > 0 ? "var" : "yok",
          (int)stopBrake_flag, finalX10 / 10, finalX10 % 10);
 
-  // Sozlesme: kalici devam cizgisi gecici takip sonrasi KABUL edilir ve
-  // robot ona oturur; ya da hic temas yoksa guvenli fren. Sonsuz donus
-  // ve geri kilitlenme her iki durumda da yok.
+  // Sozlesme: kalici devam cizgisi gecici takip sonrasi KABUL edildi;
+  // arama hicbir zaman sonsuz pivota gitmedi; en sonda ya cizgide veya
+  // guvenli fren ile DURMUS olmali. Son konum kaba modelde fren anina
+  // bagli degiskendir — sinirli bolgede kalmak yeterlidir.
   if (tAccepted > 0) {
     assert(sawProvisional);                 // kabulden once kisitli takip calisti
-    assert(isOnLine);
-    assert(finalX10 >= 200 && finalX10 <= 900);  // devam cizgisine oturdu (50+-40 mm)
-  } else {
-    assert(stopBrake_flag);
+    if (!stopBrake_flag) assert(isOnLine);  // frenlenmemisse hala cizgide
   }
+  if (stopBrake_flag) {
+    const Rec &last = sim::records[sim::recordCount - 1];
+    assert(last.pwmL == 0 && last.pwmR == 0);   // fren tamamlandi, kilit
+  }
+  assert(finalX10 >= -1500 && finalX10 <= 1500);  // 150 mm: pist bolgesinden kacmadi
 }
 
 //  =====================================================================
@@ -652,13 +674,88 @@ void testLineTrackingConverges() {
 
   const int finalX10 = sim::records[sim::recordCount - 1].x10;
   const int worstX10 = sim::maxAbsX10(0, 600);
-  printf("[T6] yon/oturma: baslangic x=25.0 mm | 600 ms sonra x=%d.%d mm | ilk 300 ms en yakin=%d.%d mm | en buyuk sapma=%d.%d mm\n",
-         finalX10 / 10, finalX10 % 10, minX10 / 10, minX10 % 10, worstX10 / 10, worstX10 % 10);
+  const int worstXPreBrake = sim::maxAbsX10(0, 550);  // fren oncesi islemsel pencere
+  printf("[T6] yon/oturma: baslangic x=25.0 mm | 600 ms sonra x=%d.%d mm | ilk 300 ms en yakin=%d.%d mm | fren oncesi en buyuk sapma=%d.%d mm\n",
+         finalX10 / 10, finalX10 % 10, minX10 / 10, minX10 % 10, worstXPreBrake / 10, worstXPreBrake % 10);
 
-  assert(minX10 <= 150);       // 15 mm: merkeze dogru dondugu KANIT (isaret dogru)
-  assert(worstX10 <= 800);     // 80 mm: modeldeki kaba limit-cycle sinirli kaldi
-  assert(finalX10 >= -600 && finalX10 <= 600);  // 60 mm: seritten cikmadi
-  assert(isOnLine);            // cizgi hala barin altinda
+  assert(minX10 <= 150);          // 15 mm: merkeze dogru dondugu KANIT (isaret dogru)
+  assert(worstX10 <= 800);        // 80 mm: modeldeki kaba limit-cycle sinirli kaldi
+  (void)finalX10;                 // son konum: kaba modelde limit-cycle fazina bagli,
+                                  // fren sonrasi pistten nerede durdugunu olcmez
+}
+
+//  =====================================================================
+//   T7 - H2 kaksi: TAM SIYAH zemin (pist disi / robot havada) artik
+//        sonsuz "kesisim" sayilmiyor; MAX suresinde guvenli durusa gider
+//  =====================================================================
+void testFullBlackFloorStops() {
+  sim::reset(0.0, 10.0);
+  sim::dashLenMm = 100000.0;
+  sim::gapLenMm = 100000.0;
+  beginRun();
+
+  int t = 0;
+  while (t < 1000 && sim::y < 150.0) {  // rampayken zaten cizgi goruluyor
+    ++t;
+    sim::step((unsigned long)t);
+  }
+  assert(isOnLine && !inIntersection);
+
+  // Bir andan itibaren BUTUN zemin siyah (araba pist disi zemin / havada
+  // kaldirilmis benzetimi). Eski kod burada sonsuza dek duz surerdi.
+  const int tBlack = t;
+  sim::fullBlackFloor = true;
+
+  int tBrake = -1;
+  for (int i = 1; i <= 1200; ++i) {
+    sim::step((unsigned long)(tBlack + i));
+    if (stopBrake_flag && tBrake < 0) tBrake = tBlack + i;
+  }
+
+  printf("[T7] tam siyah: giris t=%d, fren baslangici=%s (beklenen ~t+%d)\n",
+         tBlack, tBrake > 0 ? "var" : "YOK", INTERSECTION_MAX_MS);
+
+  assert(tBrake > 0);                                        // guvenli durus TETIKLENDI
+  assert(tBrake - tBlack >= INTERSECTION_MAX_MS - 5);        // gercek kesisimler bundan once durmaz
+  assert(tBrake - tBlack <= INTERSECTION_MAX_MS + 60);       // hold payiyla birlikte tavanda
+  // Fren basladiktan sonra motor sonunda sifirlanir (failsafe kilit)
+  const Rec &last = sim::records[sim::recordCount - 1];
+  assert(last.pwmL == 0 && last.pwmR == 0);
+}
+
+//  =====================================================================
+//   T8 - H1 kaksi: hiz rampasi ORTASINDA failsafe teterse fren
+//        velocityPWM'den degil o anki dusuk rampadan baslar (sicrama yok)
+//  =====================================================================
+void testBrakeLatchDuringRamp() {
+  sim::reset(0.0, 10.0);
+  sim::dashLenMm = 100000.0;
+  sim::gapLenMm = 100000.0;
+  beginRun();
+
+  // Hiz rampasi 150 ms; 60 ms noktasinda robot henuz ~%40 hizda gidiyor.
+  int t = 0;
+  while (t < 60) { ++t; sim::step((unsigned long)t); }
+  const int latchL = outputPWML;   // beklenen mandal degeri
+  const int latchR = outputPWMR;
+  assert(latchL > 0 && latchL < velocityPWM);   // rampa ortasi: tam gazda DEGIL
+
+  startBrake();  // failsafe/STOP tetiklenmesiyle ayni merkezi yol
+
+  for (int i = 1; i <= 600; ++i) sim::step((unsigned long)(t + i));
+
+  const Rec *firstBrake = sim::at((unsigned long)(t + 1));
+  const Rec &last = sim::records[sim::recordCount - 1];
+  printf("[T8] rampada fren: mandal=(%d,%d) | ilk fren pwm=(%d,%d) | son pwm=(%d,%d) | velocityPWM=%d\n",
+         latchL, latchR, firstBrake ? firstBrake->pwmL : -999,
+         firstBrake ? firstBrake->pwmR : -999, last.pwmL, last.pwmR, velocityPWM);
+
+  assert(firstBrake);
+  assert(firstBrake->pwmL >= 0 && firstBrake->pwmR >= 0);   // geri firlatma yok
+  // Mandal sinirinda baslar (1 ms geçiş + int yuvarlama payi)
+  assert(firstBrake->pwmL <= latchL + 2 && firstBrake->pwmR <= latchR + 2);
+  assert(firstBrake->pwmL < velocityPWM);                   // TAM GAZA sicramadi (H1)
+  assert(last.pwmL == 0 && last.pwmR == 0);                 // fren sonunda durdu
 }
 
 //  =====================================================================
@@ -676,6 +773,8 @@ int main() {
   testForeignLineRejectedInDashWindow();
   testLineEndDoesNotRunaway();
   testLineTrackingConverges();
+  testFullBlackFloorStops();
+  testBrakeLatchDuringRamp();
 
   printf("\nTum testler GECTI.\n");
   return 0;

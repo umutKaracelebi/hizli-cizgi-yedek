@@ -2,23 +2,30 @@
   ATLAS_Takim.ino - Hızlı Çizgi İzleyen Robot (Team Antigravity Sürümü)
   Taban: ATLAS 1.4.3 (c) 2026 EXOTIC TEAM MX, CC BY-NC-ND 4.0
   
-  ANTIGRAVITY DÜZELTMELERİ (2026-09-24):
+  ANTIGRAVITY DÜZELTMELERİ (2026-09-24, gün. 2026-09-27 inceleme):
    1) MEBSTART Entegrasyonu ve Kararlı Kenar Algılama (Edge-Detection):
       - START_SIGNAL_CONFIRM_MS = 60 ms ile elektriksel gürültü ve buton arkı koruması.
       - Sinyalin önce stabil 5V olduğu doğrulanır; 5V -> 0V düşen kenar şart koşulur.
-   2) 1 Saniye Kesintisiz Ön Vakum (Pre-Vacuum):
-      - Kumandaya 1. basışta önce motor sürücüsü donanımsal olarak uyandırılır (INH = 1).
-      - Tekerlekler 1 saniye boyunca kesinlikle 0 PWM'de beklerken tribün tam devrine ulaşır.
-      - 1 saniye dolunca tribün hiç kesilmeden tekerleklerle koşu (RUN) başlar.
+   2) Yumuşak Kalkış Rampaları (on-vakum fazi kodda yok; dokumandaki
+      eski "1 sn on-vakum" tanimi kaldirildi):
+      - Tekerlekler 150 ms, tribün 250 ms rampayla devreye girer (RUN aninda).
    3) Koşu Boyunca Kesintisiz Vakum Güvencesi:
       - Çizgi dışına (offline / köprü) çıkılsa dahi tribün PWM'i asla sıfırlanmaz.
-   4) Kumandaya 2. Basışta Kontrollü Frenleme ve KALICI KİLİT (Permanent Lockout):
-      - 2. basışta 500 ms kontrollü aktif fren uygulanır.
+   4) Kumandaya 2. Basışta / Failsafe'te Kontrollü Fren + KALICI KİLİT:
+      - Fren tetik anindaki GECERLI tekerlek PWM'lerine mandallanir (H1); o
+        degerlerden 500 ms'de sıfıra inilir (pivot sirasinda ileri firlamaz).
       - Tekerlekler ve tribün tamamen kapatılır; sürücüler uyutulur (INH = 0).
       - Robot sonsuz döngüde kilitlenir; 3., 4. vb. sonraki basışlar kesinlikle çalışmaz.
    5) Buton Bırakma (Debounce) ve Kalibrasyon Akış Koruması:
       - Butonlara basıldıktan sonra parmak çekilene kadar beklenir; bir önceki basış
         sonraki menüye veya starta sıçramaz.
+   6) Son saha/inceleme düzeltmeleri (27 Eyl):
+      - Kesikte tam düz kör devam (OFFLINE_DASH_COAST_MS), EMA siniflandirma,
+        yeniden yakalama yumusatma penceresi, sinirli arama butcesi ve gecici takip.
+      - Kesisim/tam-siyah ust siniri (INTERSECTION_MAX_MS) ile yanlis failsafe
+        ertelemesi engellenir.
+      - MAX secilebilir hiz, CONTROL_MAX_PWM_FORWARD - 40 olarak sinirlandi
+        (diferansiyel payi kalmasi icin).
 */
 
 //  =============================
@@ -33,7 +40,8 @@
 
 #define BASE_VELOCITY_PWM 100  // velocity selection base PWM
 #define MIN_VELOCITY_PWM 60    // velocity selection min PWM
-#define MAX_VELOCITY_PWM 250   // velocity selection max PWM
+#define MAX_VELOCITY_PWM 160   // H3 (27 Eyl inceleme): CONTROL_MAX_PWM_FORWARD(200) - direksiyon payi(40).
+                               // 200 ustu secimde kucuk hatalarda diferansiyel kirpta oluyordu.
 #define VELOCITY_PWM_STEP 10   // velocity selection PWM increment/decrement step
 
 #define IMPELLER_PWM 200  // suction impeller fan PWM value
@@ -49,7 +57,6 @@ const bool areMotorsEnabled = true;
 
 // TIME
 #define CONTROL_LOOP_PERIOD_US 750
-#define START_IMPELLER_RAMP_TIME_MS 1000
 #define STOP_BRAKE_TIME_MS 500
 #define OFFLINE_INNER_MOTOR_BRAKE_TIME_MS 35
 
@@ -154,6 +161,10 @@ const bool areMotorsEnabled = true;
 
 // Kesişim / loop geçiş köprüsü: dikey çizgi kesişiminden düz geçiş hold süresi (ms)
 #define INTERSECTION_HOLD_TIME_MS 50
+// H2 (27 Eyl inceleme): gercek kesisim gecisi ~50-150 ms surer. Bar TAM
+// siyah kalirsa (pist disi zemin / robot havada) bu "kesisim" sonsuza dek
+// failsafe'i erteler; pencere asilinca guvenli durusa gecilir.
+#define INTERSECTION_MAX_MS 400
 
 // Kalibrasyon kapısı: her sensörde (max - min) en az bu kadar olmalı (0..255 ölçek)
 #define CAL_MIN_CONTRAST 30

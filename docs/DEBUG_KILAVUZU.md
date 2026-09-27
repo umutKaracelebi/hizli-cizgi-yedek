@@ -251,7 +251,7 @@ Canli test cikis: SW1+SW2 2sn (turbinde SW2).
 
 **Amaç:** (a) MEBSTART çıkışının **mandallı mı, darbeli mi** olduğunu, (b) fiziksel SW1/SW2'nin yazılımdaki karşılığını, (c) LED eşleşmesini kesinleştirmek.
 
-**Neden gerekli:** `ATLAS_Takim` start/stop mantığı "START'ta LOW'da kalan, STOP'ta HIGH'a dönen **mandallı** sinyal" varsayar (`RunControl.ino:140-147, 193-201, 243-248`). Sinyal kısa bir darbe ise ön-vakum (1 sn) 30 ms teyitle **iptal** olur ve robot hiç kalkmaz — S1/S2'nin olası açıklamalarından biri budur.
+**Neden gerekli:** `ATLAS_Takim` start/stop mantığı "START'ta LOW'da kalan, STOP'ta HIGH'a dönen **mandallı** sinyal" varsayar. Sinyal kısa bir darbe ise: ARMED'de 60 ms'lik START onayına yetişemez (robot hiç kalkmaz) veya RUN'a geçtikten hemen sonra eski HIGH seviyesine dönünce 150 ms'lik STOP teyidiyle robot anında durur — S1/S2'nin olası açıklamalarından biri budur.
 
 **Adımlar:** Seri monitörden `1` gönder (veya SW2 ile menüyü 1'e getir, SW1 ile başlat). Seri çıktı 150 ms'de bir şu satırı yazar: `SW1=.. SW2=.. GO(D4)=..(START/bekleme) RDY(D3)=..`
 
@@ -270,7 +270,7 @@ Canli test cikis: SW1+SW2 2sn (turbinde SW2).
 
 **Sonuç yorumu (hazır):**
 - **Mandallı** ise yarış yazılımının START/STOP teyit mantığı geçerlidir.
-- **Darbeli** ise: START onayı (20 ms) geçer ama PREVACUUM'un ilk 30 ms'inde sinyal HIGH'a döner → iptal → robot hiç kalkmaz; RUN'da da anında STOP. Bu durumda yarış yazılımının başlatma mantığı için düzeltme gerekir (veri T1 sonrası planlanır).
+- **Darbeli** ise: ARMED'de 60 ms'lik START teyidi tamamlanamadan sinyal HIGH'a döner → robot hiç kalkmaz. Bu durumda yarış yazılımının başlatma mantığı için düzeltme gerekir (veri T1 sonrası planlanır).
 
 ### T2 — `[2]` 16 sensör, ham değerler ve **çizgi kutbu** (canlı)
 
@@ -328,10 +328,10 @@ Canli test cikis: SW1+SW2 2sn (turbinde SW2).
 | T0 (türbin beslemesi) | T4 (PWM ile dönüş) | Sonuç | Sonraki adım |
 |---|---|---|---|
 | Gerilim **yok** | (dönmez) | **Güç yolu sorunu** | Balans soketi / SB1 / türbin konnektörü düzeltilir |
-| Gerilim **var** | **Dönüyor** | Türbin donanımı sağlam | Neden yarış yazılımında dönmedi? → T5'te `INH`/ön-vakum sırası izlenir |
+| Gerilim **var** | **Dönüyor** | Türbin donanımı sağlam | Neden yarış yazılımında dönmedi? → T5'te `INH`/rampa sırası izlenir |
 | Gerilim **var** | **Dönmüyor** | Sürücü/pin (D11→OC2A) veya türbin motoru | `[4]`'te LED2 yanıyor ama dönmüyor ise pin/sürücü ölçülür |
 
-**Teknik not:** `ATLAS_Debug` türbin testinde `INH` **LOW** (sürücüler beklemede) ve PWM doğrudan `OCR2A`'ya yazılır (`:121, 243-245`). Yarış yazılımı da RUN'da `setPWM_Impeller` ile aynı yolu kullanır, ancak **ön-vakum aşamasında `INH` hâlâ LOW**'dur (RUN'a girişte `enableMotorDrivers()` çağrılır). Bu nedenle "T4'te dönüyor, yarışta dönmüyor" çıkarsa ilk şüpheli bu sıralama/zamanlamadır.
+**Teknik not:** `ATLAS_Debug` türbin testinde `INH` **LOW** (sürücüler beklemede) ve PWM doğrudan `OCR2A`'ya yazılır (`:121, 243-245`). Yarış yazılımı da RUN'da `setPWM_Impeller` ile aynı yolu kullanır; kodda **ayrı bir ön-vakum fazı yoktur** — RUN'a girilirken `enableMotorDrivers()` aynı anda açılır ve tribün 250 ms rampayla (`RUN_IMPELLER_RAMP_TIME_MS`) tam devere çıkar. Bu nedenle "T4'te dönüyor, yarışta dönmüyor" çıkarsa ilk şüpheli bu sıralama/zamanlamadır.
 
 ### T5 — Yarış yazılımı (`ATLAS_Takim`) ile kontrollü koşu
 
@@ -341,7 +341,7 @@ Canli test cikis: SW1+SW2 2sn (turbinde SW2).
 
 | # | İşlem | Kaydedilecek |
 |---|---|---|
-| T5.1 | `ATLAS_Takim` yükle (flash ≈ **6518**, SRAM ≈ **291**) | IDE çıktısı |
+| T5.1 | `ATLAS_Takim` yükle (flash ≈ **8328**, SRAM ≈ **324**) | IDE çıktısı |
 | T5.2 | Tekerlekler havada; **T2'nin sonucuna göre doğru buton** ile mod seç (beklenen: SW2 = siyah) | Hangi butona basıldı? |
 | T5.3 | Kalibrasyon sırasında hangi LED çakıyor? → `Sensors.ino:152-154`: **LED0+LED1** = ters (siyah mod); **yalnız LED2** = ters değil (beyaz mod) | LED deseni (mod kanıtı) |
 | T5.4 | Robotu çizgi üzerinde 3-4 kez soldan sağa salla, butonla bitir | Kapı geçti mi? Geçmediyse LED0/LED1 hızlı çakma = kalibrasyon hatası |
@@ -355,7 +355,7 @@ Canli test cikis: SW1+SW2 2sn (turbinde SW2).
 **Yorum rehberi:**
 - T5.3'te **yalnız LED2** çaktıysa: o koşuda **beyaz (yanlış) mod** seçilmişti → S3'ün nedeni büyük olasılıkla bu; tekrar denemede SW2 kullanılır.
 - LED0+LED1 çaktıysa mod doğruydu; S3 için sıradaki şüpheliler: emişsiz koşu (T4), PWM 100 (yüksek), failsafe kilidi.
-- T5.6'da 1 sn rampa görülmediyse ya ön-vakum iptal edildi (T1'de "darbeli" çıkarsa beklenen) ya da yazılım yüklü değil.
+- T5.6'da 250 ms rampa görülmediyse ya rampa iptal edildi (T1'de "darbeli" çıkarsa beklenen — yazılım 60 ms START onayını geçemez) ya da yazılım yüklü değil.
 - T5.8/T5.9 failsafe-kilit yolunu doğrular; bu davranış "kaçış" gibi görünür ama aslında robotun kendini güvenli duruşa aldığı andır.
 
 ---
@@ -411,7 +411,7 @@ T5 YARIŞ KOŞUSU
 | Kod | Bulgu | Hangi test doğrular |
 |---|---|---|
 | `RunControl.ino:272` | Uç sensörde (`position == 0` veya `15000`) çizgi "yok" sayılıyor → kurtarma/failsafe yolu | T5.8 (kaçış/kilit) |
-| `RunControl.ino:311-328` | 400 ms çizgi kaybı → 500 ms **ileri** yavaşlama rampası → kilit; kurtarmaya ~305 ms kalıyor | T5.8 (kendiliğinden durup kilitleme) |
+| `RunControl.ino` (offline dal) | Kalıcı çizgi kaybı → üst güvenlik ağı `OFFLINE_FAILSAFE_MS = 800` ms; mandallı fren tetik anındaki çıkışlardan sıfıra iner → kilit | T5.8 (kendiliğinden durup kilitleme) |
 | `RunControl.ino:158-172` | ARMED'da hız butonu basılıyken START onayı sıfırlanıyor (500 ms bloklama) | T5.5/T5.6 (START anı) |
 | `ATLAS_Takim.ino:107-121` | MEBSTART ancak mod butonundan sonra dinleniyor | T1 + T5.2 |
 | `Motors.ino` + `Sensors.ino` | Aktif fren yok; 16 bloklayan ADC okuması 750 µs bütçesini dolduruyor | T5.7 (hız/kararlılık), istenirse pin toggle ölçümü |
@@ -433,7 +433,7 @@ T5 YARIŞ KOŞUSU
 
 - Bu belge **yalnızca ölçüm planıdır**; hiçbir kaynak dosya (`ATLAS_Takim`, `ATLAS_Debug`, `Sensors/Motors/UI`) değiştirilmemiştir.
 - Koddan yapılan çıkarımlar statik okumaya dayanır (satır numaraları verilmiştir); fiziksel doğrulama yerine geçmez.
-- Derleme ölçüleri (6518/291 ve 6034/204) mevcut proje belgelerinden alınmıştır; bu oturumda yeniden derleme yapılmamıştır.
+- Derleme ölçüleri 27-28 Eylül 2026'da yeniden alınmıştır (arduino-cli, `arduino:avr:nano`): `ATLAS_Takim` flash **8328 B (%27)** / SRAM **324 B (%15)**; `ATLAS_Debug` ≈ 6034 B flash / 204 B SRAM.
 - `ATLAS_Debug` içindeki motor polaritesi ve Timer yapılandırmasının yarış yazılımıyla aynı olduğu **koddan doğrulanmıştır** (`ATLAS_Debug:125-133, 215-241` ↔ `ATLAS_Takim/Motors.ino:54-66, 91-125`).
 - Testler sonucunda hangi davranışın düzeltileceği, `DOGRULAMA_LISTESI.md` kurallarına uygun olarak **ölçüm kaydıyla** birlikte karara bağlanır; tahminle yazılım değişikliği yapılmaz.
 

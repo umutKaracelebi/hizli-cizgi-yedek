@@ -34,6 +34,7 @@ unsigned long dampUntil = 0;          // yeniden yakalama sonrasi yumusatma penc
 // intersection control
 bool inIntersection = false;
 unsigned long intersectionStartTime = 0;
+unsigned long intersectionEnterMs = 0;  // kesisime ILK giris ani (hold'da tazelenmez)
 
 // PWM
 int velocityPWM = BASE_VELOCITY_PWM;
@@ -47,14 +48,33 @@ int outputPWMImp = IMPELLER_PWM;
 bool stopBrake_flag = false;
 unsigned long stopBrakeStartTime;
 
+// H1 (27 Eyl inceleme): fren, tetik anindaki GECERLI tekerlek cikislarina
+// mandallanir ve oradan sifira iner. Eski surum freni velocityPWM'den
+// baslatiyordu: pivot/arama (120,-120) ya da hiz rampasi sirasinda STOP
+// gelirse robot fren yerine tam gaz ileri sicrardi.
+int brakeFromPwmL = 0;
+int brakeFromPwmR = 0;
+
+void startBrake() {
+  if (stopBrake_flag) return;
+  brakeFromPwmL = outputPWML;
+  brakeFromPwmR = outputPWMR;
+  stopBrakeStartTime = currentTime;
+  stopBrake_flag = true;
+  setLEDS(0);
+}
+
 void runInit() {
   enableMotorDrivers();
 
   previousError = 0;
   inIntersection = false;
   intersectionStartTime = 0;
+  intersectionEnterMs = 0;  // H2
   stopBrake_flag = false;  // kosu baslarken fren her zaman ACIK baslar
   stopBrakeStartTime = 0;
+  brakeFromPwmL = 0;
+  brakeFromPwmR = 0;
 
   // TEAM: kayip / yeniden yakalama durumunu sifirla
   offlineEpisodeActive = false;
@@ -81,12 +101,12 @@ void runInit() {
 }
 
 void updatePWMDecrementRamps() {
-  // stop velocity PWM brake phase
+  // stop velocity PWM brake phase — H1: baz deger tetik aninda mandallandi
+  // (brakeFromPwm*), asagida fren dallarinda kullanilir. Burada yalnizca
+  // bitis suresi yonetilir.
   if (stopBrake_flag) {
     if (currentTime - stopBrakeStartTime >= STOP_BRAKE_TIME_MS) {
       isRunning = false;
-    } else {
-      velPWMDecrement = velocityPWM * (currentTime - stopBrakeStartTime) / STOP_BRAKE_TIME_MS;
     }
   }
 
@@ -234,9 +254,7 @@ void run() {
       }
 
       if (stopRequested) {
-        setLEDS(0);
-        stopBrakeStartTime = currentTime;
-        stopBrake_flag = true;
+        startBrake();  // H1: mevcut tekerlek PWM'lerine mandallanir
       }
     }
   }
@@ -251,8 +269,10 @@ void updatePeriod() {
   // Çizgi konumunu hesapla
   const unsigned int position = getLinePosition();
 
-  // Tribün PWM'i koşu boyunca DAİMA tam güçte kalır (kesinlikle sıfırlanmaz)
-  outputPWMImp = IMPELLER_PWM;
+  // Tribün: kalkista 250 ms rampayla tam devre cikar (uretici niyeti;
+  // impPWMDecrement rampasi takim surumunde yanlislikla koparilmisti — H4),
+  // sonrasinda kosu boyunca DAIMA tam guclte kalir (kesinlikle sifirlanmaz)
+  outputPWMImp = IMPELLER_PWM - impPWMDecrement;
 
   //  =============================================================
   //   K E S İ Ş İ M   T E S P İ T İ  (Intersection / Loop Detection)
@@ -283,6 +303,7 @@ void updatePeriod() {
   const bool isIntersectionRaw = bothWings || wideSpan || leftCrossTouch || rightCrossTouch;
 
   if (isIntersectionRaw) {
+    if (!inIntersection) intersectionEnterMs = currentTime;  // H2: ilk giris ani
     inIntersection = true;
     intersectionStartTime = currentTime;
   } else if (inIntersection) {
@@ -291,6 +312,15 @@ void updatePeriod() {
     if (currentTime - intersectionStartTime >= INTERSECTION_HOLD_TIME_MS) {
       inIntersection = false;
     }
+  }
+
+  // H2 (27 Eyl inceleme): kesisim MAX suresini asarsa bu artik gercek
+  // kesisim degil (tam siyah zemin / pist disi / robot havada). Bu durumda
+  // kesisim dali offlineStartTime'i surekli tazeleyip failsafe'i
+  // erteliyordu -> robot sonsuza dek duz giderdi. Guvenli durusa gec.
+  if (inIntersection && (currentTime - intersectionEnterMs) >= INTERSECTION_MAX_MS) {
+    inIntersection = false;
+    if (!stopBrake_flag) startBrake();
   }
 
   //  =============================================================
@@ -346,10 +376,17 @@ void updatePeriod() {
   }
 
   if (stopBrake_flag) {
-    // 1) FRENLEME AŞAMASI
-    const int base = velocityPWM - velPWMDecrement;
-    outputPWML = base;
-    outputPWMR = base;
+    // 1) FRENLEME AŞAMASI — H1: tetik aninda mandallanmis cikislardan
+    // dogrusal olarak sifira inilir (velocityPWM'den baslamaz!)
+    const unsigned long brakeElapsed = currentTime - stopBrakeStartTime;
+    const long remain = (long)STOP_BRAKE_TIME_MS - (long)brakeElapsed;
+    if (remain > 0) {
+      outputPWML = (int)((long)brakeFromPwmL * remain / (long)STOP_BRAKE_TIME_MS);
+      outputPWMR = (int)((long)brakeFromPwmR * remain / (long)STOP_BRAKE_TIME_MS);
+    } else {
+      outputPWML = 0;
+      outputPWMR = 0;
+    }
 
   } else if (inIntersection) {
     // 2) KESİŞİM / LOOP GEÇİŞİ (Intersection Pass-Through)
@@ -456,16 +493,20 @@ void updatePeriod() {
 
     // Ust guvenlik agi: cizgi bu surede kabul edilemediyse fren + kilit
     if (offlineElapsedTime >= OFFLINE_FAILSAFE_MS && !stopBrake_flag) {
-      stopBrakeStartTime = currentTime;
-      stopBrake_flag = true;
-      setLEDS(0);
+      startBrake();
     }
 
     if (stopBrake_flag) {
-      // Fren rampası
-      const int base = velocityPWM - velPWMDecrement;
-      outputPWML = base;
-      outputPWMR = base;
+      // Fren rampasi — H1: mandalli cikislardan sifira
+      const unsigned long brakeElapsed = currentTime - stopBrakeStartTime;
+      const long remain = (long)STOP_BRAKE_TIME_MS - (long)brakeElapsed;
+      if (remain > 0) {
+        outputPWML = (int)((long)brakeFromPwmL * remain / (long)STOP_BRAKE_TIME_MS);
+        outputPWMR = (int)((long)brakeFromPwmR * remain / (long)STOP_BRAKE_TIME_MS);
+      } else {
+        outputPWML = 0;
+        outputPWMR = 0;
+      }
 
     } else if (offlineIsDash) {
       // DUZ KESIKLI CIZGI — KOR DUZ DEVAM:
@@ -479,9 +520,7 @@ void updatePeriod() {
       outputPWMR = base;
 
       if (offlineElapsedTime >= OFFLINE_DASH_COAST_MS) {
-        stopBrakeStartTime = currentTime;
-        stopBrake_flag = true;
-        setLEDS(0);
+        startBrake();
       }
 
     } else if (offlineElapsedTime <= OFFLINE_GAP_BRIDGE_MS) {
@@ -511,11 +550,9 @@ void updatePeriod() {
         outputPWMR = base - steer;
       } else if (searchElapsed >= OFFLINE_SEARCH_MAX_MS) {
         // Butce doldu, cizgi yok: guvenli durus
-        stopBrakeStartTime = currentTime;
-        stopBrake_flag = true;
-        setLEDS(0);
-        outputPWML = base;
-        outputPWMR = base;
+        startBrake();
+        outputPWML = brakeFromPwmL;
+        outputPWMR = brakeFromPwmR;
       } else {
         // Yerinde donus: once kaybedilen yone kisa faz, sonra ters yone
         const bool searchDir = (searchElapsed < OFFLINE_SEARCH_FIRST_MS)

@@ -88,22 +88,26 @@ OFFLINE_FAILSAFE_MS (1200 ms) boyunca çizgi yoksa → 500 ms fren + kalıcı ki
 
 ## 4. Parametre değişiklikleri
 
-| Sabit | Eski | Yeni | Gerekçe |
+> **27 Eylül revizyonu:** Bu bölümdeki tablo 25 Eylül düzeltmesine aitti; sahadaki belirtiler (kesikte zikzak / geri dönüş / sağa sapma) sonrasında parametreler bir kat daha değişti. Güncel değerler:
+
+| Sabit | 25 Eylül | 27 Eylül (güncel) | Gerekçe |
 |---|---|---|---|
 | `OFFLINE_GAP_BRIDGE_MS` | 15 | 15 | Dönüş/keskin köşe için kısa kör devam korundu |
-| `OFFLINE_DASH_BRIDGE_MS` | 75 (kullanılmıyordu) | **120** | 40–56 mm boşluk ≈ 0.5–1 m/s'de 40–110 ms; artık gerçekten devrede |
-| `OFFLINE_DASH_CENTER_BAND` | – | 3500 | Kayıp anında hat merkezde miydi? |
-| `OFFLINE_DASH_STEER_MAX` | – | 150 | Kayıp anında düz mü gidiliyordu? |
-| `OFFLINE_DASH_HOLD_STEER_MAX` | – | 80 | Köprüde direksiyon kalıntısını sınırlar |
-| `OFFLINE_DASH_REACQUIRE_BAND` | – | 4500 | Kesik sonrası devam çizgisinin beklenen bandı |
-| `OFFLINE_MIN_CONFIRM_LOOPS` | – | 3 | Tek sensörlük parazit "çizgi bulundu" sayılmaz |
-| Arama PWM'i | dış +200 / iç -120 | ±120 | Tam güç yerine sınırlı tork, **yerinde** dönüş |
-| `OFFLINE_SEARCH_PHASE_MS` | – (sürekli tek yön) | 250 | 250 ms'de bir ters yöne tarama |
-| `OFFLINE_FAILSAFE_MS` | 1500 | 1200 | Kalıcı kayıpta daha erken güvenli fren |
-| Türev darbesi | `previousError` bayat | `deltaError = 0` | Yeniden yakalamada savrulma yok |
-| Merkez sabiti | satır içi `15000/2` | `LINE_CENTER_POSITION` | Tek kaynak, okunabilirlik |
+| ~~`OFFLINE_DASH_BRIDGE_MS`~~ → `OFFLINE_DASH_COAST_MS` | 120 | **250** | Köprü 56 mm boşluğun ortasında doluyordu; artık düz kesikte direksiyon TAMAMEN sıfır, bulunamazsa fren |
+| `OFFLINE_DASH_CENTER_BAND` | 3500 | 3500 | Kayıp anında hat merkezde miydi (artık EMA `posSmooth` üzerinden) |
+| `OFFLINE_DASH_STEER_MAX` | 150 | 300 | Direksiyon ölçütü: ±400 kırpılmış 1/4 EMA (`steerSmooth`)—tek darbe ~200'ü aşamaz |
+| `OFFLINE_DASH_HOLD_STEER_MAX` | 80 | **(kaldırıldı)** | Köprüde direksiyon tutma iptal — sapma kaynağıydı |
+| `OFFLINE_DASH_REACQUIRE_BAND` | 4500 | 4500 | Kesik sonrası devam çizgisinin beklenen bandı |
+| `OFFLINE_MIN_CONFIRM_LOOPS` | 3 | **4** | Bant içi kabülde art arda döngü teyidi |
+| `OFFLINE_DASH_SIDE_CONFIRM_MS` | – | **40** | Bant dışı ama kesintisiz çizgi = gerçek eğri (kesikte kayan devam) |
+| `REACQUIRE_DAMP_MS` / `REACQUIRE_STEER_CLAMP` | – | **100 / 150** | Yeniden yakalama sonrası direksiyon sınırı (zikzag/darbe freni) |
+| Arama | `OFFLINE_SEARCH_PHASE_MS=250` (sınırsız çift yönlü) | **`OFFLINE_SEARCH_FIRST_MS=100`, `OFFLINE_SEARCH_MAX_MS=280`, `OFFLINE_SEARCH_TRACK_MS=60`** | Sınırlı bütçe + tek ters faz; geçici takip sadece 60 ms kesintisiz temasla kabul — geri kilitlenme engeli |
+| `OFFLINE_FAILSAFE_MS` | 1200 | **800** | Üst güvenlik ağı |
+| `MAX_VELOCITY_PWM` | 250 | **160** | `CONTROL_MAX_PWM_FORWARD`−40; 200 üstünde diferansiyel kırpta ölüyordu (H3) |
+| Fren başlangıcı | `velocityPWM`'den (sıçrama yapıyordu) | **tetik anı çıkışlarına mandallı** | Pivot/arama veya rampada gelen STOP'ta ileri fırlama engellendi (H1) |
+| Kesişim süresi | sınırsız | **`INTERSECTION_MAX_MS=400`** | Tam siyah zemin/pist dışı artık sonsuz serbest sürüş değil, güvenli duruş (H2) |
 
-Sürüş (PD) katsayıları, hız seçimi (60–250 PWM), türbin PWM'i ve kalibrasyon eşiği **değiştirilmedi**: sorun kontrol/kurtarma mantığındaydı, ayar değerlerinde değil. Bir değişkeni bir kerede değiştirme kuralı korundu.
+Sürüş (PD) katsayıları, hız seçimi (60–160 PWM — üst sınır direksiyon payı için düşürüldü), türbin PWM'i ve kalibrasyon eşiği **değiştirilmedi**: sorun kontrol/kurtarma mantığındaydı, ayar değerlerinde değil. Bir değişkeni bir kerede değiştirme kuralı korundu.
 
 ## 5. Doğrulama
 
@@ -117,7 +121,7 @@ $cli = "$env:LOCALAPPDATA\Programs\Arduino IDE\resources\app\lib\backend\resourc
 - Düzeltme **öncesi**: derlenmiyor (K1'deki hatalar).
 - Düzeltme **sonrası**: `flash 7504/30720 B`, `SRAM 305/2048 B`, uyarı yok.
 
-### 5.2 Masaüstü kontrol-mantığı testi (hazır, koşturulmadı)
+### 5.2 Masaüstü kontrol-mantığı testi (koştu, T1–T8 geçti)
 
 Dosyalar: `antigravity-takim/tests/dash_gap_test.cpp`, `tests/atlas_prototypes.h`, `tests/stubs/Arduino.h`.
 Test, gerçek `.ino` sekmelerini olduğu gibi dahil eder; Arduino/AVR katmanını taklit ederek `updatePeriod()` döngüsünü adım adım koşturur.
@@ -130,16 +134,19 @@ if ($LASTEXITCODE -eq 0) { & "$env:TEMP\atlas_dash_test.exe" }
 
 | Test | İddia |
 |---|---|
-| T1 | Düz kesikli çizgide ≥3 beyaz boşluk geçilir; boşlukta **negatif PWM (dönüş) olmaz**, şeritte kalınır |
-| T2 | +15 ms'de iki teker de ileri (dönüş yok), +125 ms'de yerinde dönüş başlar |
-| T3 | Kenardan kayıpta (köşe) 15 ms sonra arama başlar ve yön `lastDetectedSide` ile aynıdır |
-| T4 | Kesik penceresinde bar ucundaki yabancı çizgi reddedilir; gerçek devam çizgisi gelince `previousError == error` (türev darbesi yok) |
-| T5 | Çizgi tamamen biterse arama ±120 ile sınırlıdır, robot yerinde döner, 1200 ms'de failsafe |
-| T6 | 25 mm kaçık başlangıçta PD çizgiye oturur (işaret/yön doğrulaması) |
+| T1 | Düz kesikli çizgide ≥3 beyaz boşluk geçilir; boşlukta **negatif PWM (dönüş) yok**, direksiyon tamamen sıfır |
+| T2 | Düz kesikte köprü boyunca iki teker eşit-ileri; köprü dolunca fren başlar (arama **yok**) |
+| T3 | Kenardan kayıpta (köşe) 15 ms sonra SINIRLI arama; önce kaybedilen yön, sonra TEK ters faz; bütçe dolunca fren — asla sonsuz pivot yok |
+| T3b | Arama sırasında kalıcı yan çizgi hemen kilitlenmez; 60 ms kesintisiz temasla "geçici takip" sonrası kabul |
+| T4 | Kesik penceresinde bar ucundaki yabancı çizgi reddedilir; gerçek devam çizgisi yeniden yakalanırken türev darbesi olmaz |
+| T5 | Çizgi tamamen biterse robot düz durur, dönmez; `OFFLINE_DASH_COAST_MS` sonunda güvenli fren |
+| T6 | 25 mm kaçık başlangıçta PD doğru yöne döner ve merkeze yaklaşır (işaret doğrulaması) |
+| T7 | Tam siyah zemin (pist dışı/havadayken) artık sonsuz "kesişim" değil; ~400 ms'de güvenli duruş (H2) |
+| T8 | Hız rampası ortasında gelen fren, tam gaza sıçramaz; tetik anındaki (düşük) PWM'den sıfıra iner (H1) |
 
 **Sınırlar:** Modelde PWM→hız ilişkisi doğrusal; enkoder, patinaj, vakum sürtünmesi, motor zaman sabiti ve gerçek gecikmeler yok. Test "gerçek pistte çalıştı" kanıtı değil, kontrol mantığının regresyonudur.
 
-**Bu makinede durum:** host C++ derleyicisi (g++/clang/MSVC) kurulu olmadığı için test koşturulamadı. Test dosyası hedef için `avr-g++ -fsyntax-only -Wall -Wextra` ile derlendi: **0 hata, 0 uyarı** (tüm fonksiyon bildirimleri ve tipler gerçek `.ino` koduyla tutarlı). Koşum sonrası çıkan sayılar buraya eklenmelidir.
+**Bu makinede durum (28 Eylül):** g++ 14.2.0 (MSYS2) ile koşturuldu — **T1–T8 tümü GEÇTİ**. Hedef kart derlemesi: `arduino-cli compile --fqbn arduino:avr:nano --warnings all ATLAS_Takim` → **0 hata, 0 uyarı**, flash **8328 B (%27)**, SRAM **324 B (%15)**.
 
 ## 6. Sahada doğrulama planı
 
@@ -157,18 +164,23 @@ Her adımda tek değişken; sonuçlar [test ve yarışma planı §7](TEST_VE_YAR
 
 | Belirti | Parametre | Yön |
 |---|---|---|
-| Boşluk geçilmiyor, robot daha beyazdayken dönüyor | `OFFLINE_DASH_BRIDGE_MS` | 120 → 150 (kör süre artar) |
+| Boşluk geçilmiyor, robot daha beyazdayken duruyor | `OFFLINE_DASH_COAST_MS` | 250 → 300 (kör süre artar) |
+| Kesik çıkışında hafif titreme kalıyor | `REACQUIRE_DAMP_MS`, `REACQUIRE_STEER_CLAMP` | 100 → 150 ms; 150 → 100 (daha yumuşak) |
 | Gerçek virajlarda gecikme/savrulma | `OFFLINE_GAP_BRIDGE_MS`, `OFFLINE_DASH_CENTER_BAND` | 15 → 10; 3500 → 2500 |
-| Kesik sonrası yanlış çizgi kabul ediliyor | `OFFLINE_DASH_REACQUIRE_BAND` | 4500 → 3000 |
-| Arama çok hızlı / yavaş | `OFFLINE_SEARCH_PWM`, `OFFLINE_SEARCH_PHASE_MS` | ±120, 250 ms |
-| Failsafe çok erken / geç | `OFFLINE_FAILSAFE_MS` | Köprü + faz süreleri toplamından büyük olmalı (1200 ms) |
+| Kesik sonrası yanlış çizgi kabul ediliyor | `OFFLINE_DASH_REACQUIRE_BAND`, `OFFLINE_DASH_SIDE_CONFIRM_MS` | 4500 → 3000; 40 → 60 ms |
+| Arama çok hızlı / yavaş | `OFFLINE_SEARCH_PWM`, `OFFLINE_SEARCH_FIRST_MS`, `OFFLINE_SEARCH_MAX_MS` | ±120; ilk faz 100 ms; toplam bütçe 280 ms |
+| Köşede yeterince aranmadan duruyor | `OFFLINE_SEARCH_MAX_MS` | 280 → 400 (arama bütçesi artar) |
+| Failsafe çok erken / geç | `OFFLINE_FAILSAFE_MS` | Tüm offline sürelerinden büyük olmalı (şu an 800 ms) |
+| Pist dışına çıkıp düz sürüyor | `INTERSECTION_MAX_MS` | 400 → 250 (daha erken dur) |
+| Yüksek hızda viraj kaçırma | `BASE_VELOCITY_PWM` / `MAX_VELOCITY_PWM` | MAX üst sınırı `CONTROL_MAX_PWM_FORWARD - 40`'ı AŞMA (yoksa diferansiyel kırpılır, H3) |
 
 ## 8. Değişen ve eklenen dosyalar
 
 - `antigravity-takim/antigravity-takim.ino` — kesik/dönüş parametreleri yeniden düzenlendi.
-- `antigravity-takim/RunControl.ino` — kopyalanmış bozuk blok silindi; kayıp sınıflandırması, köprü, yerinde dönüşlü arama, yeniden yakalama kapısı ve türev darbesi düzeltmesi eklendi.
-- `antigravity-takim/tests/` — **yeni**: `dash_gap_test.cpp`, `atlas_prototypes.h`, `stubs/Arduino.h`. `tests/` alt klasörü Arduino derlemesine dahil edilmez (doğrulandı: sketch yine sorunsuz derleniyor).
+- `antigravity-takim/RunControl.ino` — kopyalanmış bozuk blok silindi; kayıp sınıflandırması, köprü, yerinde dönüşlü arama, yeniden yakalama kapısı ve türev darbesi düzeltmesi eklendi. (27 Eylül'de ayrıca mandallı fren, kesişim tavanı, tribün rampası geri bağlandı.)
+- `antigravity-takim/tests/` — **yeni**: `dash_gap_test.cpp`, `atlas_prototypes.h`, `stubs/Arduino.h`. `tests/` alt klasörü Arduino derlemesine dahil edilmez (doğrulandı: sketch yine sorunsuz derleniyor). T1–T8 yeşil.
+- `ATLAS_Takim/` — 27 Eylül düzeltmesi antigravity'den aynalandı (5 sekme birebir aynı).
 - `docs/KESIKLI_CIZGI_DUZELTMESI.md` — bu belge.
-- `Motors.ino`, `Sensors.ino`, `UI.ino` — değişmedi.
+- `Motors.ino`, `Sensors.ino`, `UI.ino` — değişmedi. (Not: `Sensors.ino:28`'deki "right adjusted" yorumu teorik olarak yanlıştır — kod `ADLAR=1` yani **left**-adjusted kullanır; davranış doğrudur, dokunulmadı.)
 
 Lisans notu: üretici tabanı CC BY-NC-ND 4.0'tır; bu sürüm yalnızca takım içi kullanım içindir, kamuya açık dağıtılamaz.

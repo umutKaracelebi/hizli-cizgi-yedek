@@ -21,7 +21,7 @@ Bu plan sabah sırasıyla uygulanır; bir adım geçilemeden sonrakine geçilmez
 - Arkadaşına **tek bir dosya gönderme.** `ATLAS_YARIS_PAKETI_23EYL.zip`'i (klasörde hazır) olduğu gibi gönder; içinde `ATLAS_Takim/` (5 sekme) + `ATLAS_Debug/` + `NASIL_YUKLENIR.txt` var.
 - IDE'de `ATLAS_Takim.ino` açıldığında sekme çubuğunda **5 sekme** görünmeli: `ATLAS_Takim | Motors | RunControl | Sensors | UI`. Görünmüyorsa yükleme; zip'i yeniden aç.
 - Üreticinin orijinal kök `.ino` dosyalarını bu klasörlere karıştırma. Derleme hatası çıkarsa AI'a yamalatma; hatayı olduğu gibi takıma ilet.
-- Beklenen derleme ölçüleri: ATLAS_Takim ≈ flash 6518 / SRAM 291; ATLAS_Debug ≈ flash 6034 / SRAM 204.
+- Beklenen derleme ölçüleri (yeniden ölçüldü, arduino-cli `arduino:avr:nano`): ATLAS_Takim ≈ flash 8328 / SRAM 324; ATLAS_Debug ≈ flash 6034 / SRAM 204.
 
 ## 1. MEBSTART montajı (ilk iş)
 
@@ -59,7 +59,7 @@ Yeni akış (MEBSTART durum makinesi):
 ```
 Güç aç → açılış animasyonu → KALİBRASYON (**SW2** seç = siyah çizgi) → kapı kontrolü
 → ARMED (LED0 yanıp söner; SW1=hız azalt, SW2=hız artır)
-→ Kumanda START → 1 sn ön-vakum (LED2 hızlı çakar)
+→ Kumanda START → yumuşak kalkış (tribün 250 ms rampa, tekerlek 150 ms rampa)
 → KOŞU (tüm LED'ler yanık)
 → STOP: kumandadan STOP veya SW1+SW2 → 500 ms fren → KİLİT (reset gerekir)
 ```
@@ -69,15 +69,15 @@ Adım adım:
 2. **SW2'ye bas** — bizim pist **beyaz zemin + siyah çizgi**, yani "siyah çizgi modu" gerekir. Kılavuz ve senin 22 Eylül gözlemin aynı şeyi gösteriyor: **SW1 = beyaz çizgi modu, SW2 = siyah çizgi modu.** (Önceki taslakta yanlışlıkla SW1 yazıyordu, düzeltildi.) SW2'ye basınca kalibrasyon **başlar**: LED'ler yanıp sönerken robotu elinde çizgi üstünde 3–4 kez soldan sağa yavaşça salla (16 sensör de hem beyazı hem siyahı görsün) → herhangi bir butonla **kalibrasyonu bitir.**
 3. **Kapı kontrolü:** kontrast düşükse LED0/LED1 hızlı çakıp kalır = kalibrasyon başarısız → resetle, 2. adımı tekrarla (daha geniş salla). Ondan emin olunca: ARMED, LED0 yavaş çakar.
 4. **Hız ayarı:** ilk koşu SW1 ile **PWM 60'a** düşür varsayılan 100 bile hızlı gelebilir; tekerleği havada tutup test ettiğin PWM 60 güvenli taban).
-5. **START:** operatör çekilir → kumandayla START. Türbin 1 sn şişer (ön-vakum); tekerlekler sonra hareket eder. İlk 2 metrede robotu takip et ama **dokunma.**
+5. **START:** operatör çekilir → kumandayla START. Tribün 250 ms rampayla tam devere çıkar; tekerlekler 150 ms rampayla hareket eder. İlk 2 metrede robotu takip et ama **dokunma.**
 6. **STOP:** tur sonunda veya kaçışta: kumandadan STOP; yedek: SW1+SW2 çift basım. 500 ms fren sonrası LED'ler 1 sn arayla çakıyorsa robot kilitte — **reset ile yeni koşu.**
 7. Her koşudan sonra pil sökmeye gerek yok ama **toplam açık kalma 45 sn'yi geçmesin** (regülatör ısınması); koşular arası 1–2 dk mola.
 
 ## 5. Kesikler (dashed) için A planı / B planı
 
-- **A planı (yazılım):** `OFFLINE_GAP_BRIDGE_MS = 60` aktif. Robot çizgiyi kaybedince ilk 60 ms aynı hızda düz devam eder, sonra üreticinin kurtarma manevrasına döner; 400 ms boyunca çizgi bulamazsa **kendi kendine fren yapar** (failsafe). Bu ayar 5–9 cm'lik kesikleri geçmeli. Zigzag/90° köşeler kurtarma manevrasıyla dönülür.
+- **A planı (yazılım, 27 Eylül güncel):** Robot düz giderken çizgiyi kaybedince `OFFLINE_DASH_COAST_MS = 250` ms boyunca direksiyonsuz TAM DÜZ devam eder; bulamazsa fren. Kenardan kayıpta (köşe) 15 ms köprü + sınırlı arama (`OFFLINE_SEARCH_FIRST_MS/MAX_MS = 100/280`); 60 ms kesintisiz temas isteyen geçici takip geri kilitlenmeyi engeller. Üst güvenlik ağı `OFFLINE_FAILSAFE_MS = 800`. Bu ayar 5–9 cm'lik kesikleri geçmeli, zikzak/90° köşelerde arama döner.
 - **B planı (bant):** kesik bölgede robot dönüyorsa/kayboluyorsa ve zaman daralıyorsa → kesikleri bantla kapat, kesintisiz çizgiyle turu tamamlamaya odaklan. (Bugünün hedefi ilk tam tur; kesik geçişi haftaya da iyileştirilebilir.) B bandını kullandıysan kayıt şablonuna yaz.
-- GAP ayarı gerekiyorsa: `ATLAS_Takim.ino` içindeki `OFFLINE_GAP_BRIDGE_MS` (denenecek dizi: 60 → 100 → 150; büyüttükçe kör uçuş süresi artar), sonra yeniden yükle. Her değişiklikte derleyip USBasp ile yükle.
+- COAST ayarı gerekiyorsa: `ATLAS_Takim.ino` içindeki `OFFLINE_DASH_COAST_MS` (denenecek dizi: 250 → 300 → 350; büyüttükçe kör uçuş süresi artar), sonra yeniden yükle. Her değişiklikte derleyip USBasp ile yükle.
 
 ## 6. Gözlem ve kayıt (her koşu)
 
