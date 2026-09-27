@@ -62,8 +62,9 @@ const bool areMotorsEnabled = true;
 // NOT (TEAM, 25 Eylul 2026): yukaridaki iki PWM ve asagidaki fren suresi
 // URETICININ eski kurtarma manevrasi icindir ve artik KULLANILMIYOR.
 // Yerine "T E A M   P A R A M E T R E L E R I" bolumundeki siniflandirmali
-// kopru + yerinde donuslu arama mantigi gecti (OFFLINE_SEARCH_PWM,
-// OFFLINE_SEARCH_PHASE_MS). Referans icin birakildi.
+// kopru + SINIRLI yerinde donuslu arama + gecici takip mantigi gecti
+// (OFFLINE_SEARCH_PWM, OFFLINE_SEARCH_FIRST_MS, OFFLINE_SEARCH_MAX_MS).
+// Referans icin birakildi.
 
 // OTHERS
 #define SENSORS_THRESHOLD_PCT 50
@@ -79,41 +80,77 @@ const bool areMotorsEnabled = true;
 // ---------------------------------------------------------------------
 // CIZGI KAYBI YONETIMI (kesikli cizgi / keskin donus ayrimi)
 // ---------------------------------------------------------------------
-// Sorun: "kesikli cizgi"de robot beyaz bosluga girince nereye gittigi
-// belirsiz kaliyordu. Eski surumde kopru penceresi tek bir degere (15 ms)
-// bagliydi; bu sure 40-56 mm'lik beyaz bosluk icin cok kisa oldugundan
-// robot daha beyaz alandayken ureticinin sert pivot manevrasina giriyor,
-// ya geldigi cizgiye geri donuyor ya da pist disi zemin cizgisine
-// kilitleniyordu.
+// SAHA GERI BILDIRIMI (27 Eyl 2026, pist 1 beyaz kesik cizgileri):
+// Onceki surumde (120 ms kopru + azalan direksiyon tutma + sinirsiz
+// iki yonlu arama) robot kesikte bazen duz geciyor, bazen zikzak
+// ciziyor, bazen geldigi cizgiye GERI DONUYOR, bazen de kesikten
+// saga sapip pist disina cikiyordu. Koki nedenler:
+//   1) 120 ms kopru gercek bosluk suresinden kisa kalabiliyordu
+//      (orta hizda 56 mm bosluk ~160 ms); kopru BOSLUGUN ORTASINDA
+//      dolunca yerinde donuslu arama beyaz alanda basliyor, robot
+//      180 derece donup arkadaki kesik parcasina kilitleniyordu.
+//   2) Kopru boyunca kayip anindaki son PID degeri (turev darbesi
+//      dahil) +-80'e kadar tutuluyordu -> robota yanal sapma.
+//   3) Yeniden yakalamada tek donguluk turev sifirmasi yeterli
+//      degildi; sonraki dongude konum sicalamasi buyuk D darbesi
+//      uretiyor -> kesikte zikzak.
+//   4) Siniflandirma, darbeli ani linePWM'e bakiyordu.
 //
-// Cozum: kayip ani siniflandirilir (konum merkezde mi, direksiyon duz mu
-// idi). Duz kayipta (kesikli cizgi) uzun bir DUZ DEVAM penceresi kullanilir;
-// merkezden sapan kayipta (90 derece zikzak / virak cikisi) kisa koprudan
-// sonra yumusak arama manevrasi uygulanir.
+// GECERLI TASARIM:
+//   - Kayip ani, SONULMIS direksiyon (EMA) ve son konumla siniflanir.
+//   - DUZ KESIK: direksiyon tamamen sifirlanarak DUZ kor devam; bu
+//     pencerede asla donus/arama yapilmaz. Devam cizgisi merkez
+//     bandinda gorunurse kabul; bant disinda KALICI cizgi gorunurse
+//     (gercek egri / 90 derece zikzak sonrasi parca) kisa bir kalicilik
+//     suresi sonunda kabul edilir. Bosluk pencereyi asarsa guvenli durus.
+//   - KESKIN DONUS: kisa kopru -> sinirli sureli yerinde arama
+//     (ilk faz kaybedilen yone kisa, sonra bir kez ters yon; toplam
+//     butce asilirsa guvenli durus). Boylece 180+ derece donup geri
+//     kilitlenme engellenir.
+//   - Her yeniden yakalamadan sonra kisa bir "yumusatma" penceresi:
+//     direksiyon duzeltmesi sinirlanir (zikzak/darbe onlemi).
 
 // Kayip ani siniflandirmasi
+// Ayrut esasi KONUM: duz kesikte cizgi kaybolmadan once merkezdedir;
+// keskin donus/kose cikisinda bar kenara kaymistir. Direksiyon olcutu
+// yalnizca "susturulmus sert pivot"u yakalamak icindir; tek donguluk
+// turev darbeleri (sahadaki zikzak hali) +-400'e kirpilip 1/4 EMA'dan
+// gectigi icin birkac dongude ~200'u asamaz -> 300 esigi guvenli ayirir.
 #define LINE_CENTER_POSITION 7500        // 0..15000 olceginde merkez degeri
-#define OFFLINE_DASH_CENTER_BAND 3500    // |konum - merkez| bu bant icindeyse "merkezden kayip"
-#define OFFLINE_DASH_STEER_MAX 150       // |son linePWM| bunun altindaysa "duz gidiyordu"
+#define OFFLINE_DASH_CENTER_BAND 3500    // |sonulmus konum - merkez| bu bant icindeyse "merkezden kayip"
+#define OFFLINE_DASH_STEER_MAX 300       // |sonulmus direksiyon| bunun altindaysa "pivot yapmiyordu"
 
 // Kopru (kor devam) sureleri
 #define OFFLINE_GAP_BRIDGE_MS 15         // Donus/keskin kose: kisa kor devam
-#define OFFLINE_DASH_BRIDGE_MS 120       // Duz kesikli cizgi: duz devam penceresi
-#define OFFLINE_DASH_HOLD_STEER_MAX 80   // Kopruda tutulacak en fazla direksiyon (yumusak gecis)
+#define OFFLINE_DASH_COAST_MS 250        // Duz kesikli cizgi: DUZ kor devam penceresi
 
-// Yeniden yakalama kapisi
+// Yeniden yakalama kapilari
 #define OFFLINE_DASH_REACQUIRE_BAND 4500 // Kesik sonrasi devam cizgisi bu bantta beklenir
-#define OFFLINE_MIN_CONFIRM_LOOPS 3      // Yeniden yakalama icin ardisik dongu teyidi
+#define OFFLINE_MIN_CONFIRM_LOOPS 4      // Yeniden yakalama icin ardisik dongu teyidi
+#define OFFLINE_DASH_SIDE_CONFIRM_MS 40  // Kesikte bant disi ama KALICI cizgi = gercek egri
 
-// Arama manevrasi (kopru dolduktan sonra, cizgi hala yok)
-// Yerinde donus: dis teker +PWM, ic teker -PWM. Boylece robot ileri
-// kacmaz, yalnizca barini cevirerek cizgiyi arar. Faz sonunda yon
-// ters cevrilir.
+// Yeniden yakalama sonrasi yumusatma (kesik zikzagi / darbe onlemi)
+#define REACQUIRE_DAMP_MS 100            // Yumusatma penceresi suresi
+#define REACQUIRE_STEER_CLAMP 150        // Pencerede en fazla |direksiyon duzeltmesi|
+
+// Arama manevrasi (keskin donus; kisa kopru dolduktan sonra, cizgi hala yok)
+// Yerinde donus: dis teker +PWM, ic teker -PWM -> robot ileri kacmaz.
+// (27 Eyl saha) Iki yonlu fazlar SONSUZA kadar surebiliyordu; robot 180+
+// derece donup geldigi cizgiye kilitleniyordu ("oldugu cizgiden geri dondu").
+// Gecerli tasarim:
+//  - Once kaybedilen yone KISA tek faz, sonra TEK ters faz; toplam butce
+//    SEARCH_MAX ile sinirlidir, asilirsa guvenli durus (asla geri donmez).
+//  - Arama sirasinda bir cizgi gorunurse hemen kilitlenilmez: kisitli
+//    duzeltmeyle "gecici takip" baslar ve ancak temas SEARCH_TRACK_MS
+//    boyunca kesintisiz surerse kabul edilir. Arkadan/egik kisa temaslar
+//    (eski geri kilitlenme arizasi) bu sayede elenir.
 #define OFFLINE_SEARCH_PWM 120           // Arama donus siddeti (simetrik)
-#define OFFLINE_SEARCH_PHASE_MS 250      // Bir yonde arama suresi; sonra ters yon
+#define OFFLINE_SEARCH_FIRST_MS 100      // Ilk yonde (kaybedilen tarafa) arama suresi
+#define OFFLINE_SEARCH_MAX_MS 280        // Toplam arama butcesi; sonra fren + kilit
+#define OFFLINE_SEARCH_TRACK_MS 60       // Gecici takipte kesintisiz temas teyidi
 
-// Cizgi bu sure boyunca bulunamazsa guvenli durus (fren + kalici kilit)
-#define OFFLINE_FAILSAFE_MS 1200
+// Her durumda ust guvenlik agi (fren + kalici kilit)
+#define OFFLINE_FAILSAFE_MS 800
 
 // Kesişim / loop geçiş köprüsü: dikey çizgi kesişiminden düz geçiş hold süresi (ms)
 #define INTERSECTION_HOLD_TIME_MS 50

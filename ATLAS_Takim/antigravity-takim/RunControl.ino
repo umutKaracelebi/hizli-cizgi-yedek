@@ -24,8 +24,12 @@ bool offlineEpisodeActive = false;    // su an bir kayip/kopru olayi icinde miyi
 bool offlineIsDash = false;           // kayip "duz kesikli cizgi boslugu" mu, yoksa donus mu
 bool offlineSearchSide = false;       // arama manevrasinin ilk yonu (LEFT/RIGHT)
 unsigned int lastOnLinePosition = 0;  // kayiptan onceki son gecerli konum (0 = hic yok)
-int lastLinePWM = 0;                  // kayiptan onceki son direksiyon duzeltmesi
-byte reacquireCount = 0;              // yeniden yakalama teyit sayaci
+unsigned int posSmooth = 7500;        // konum EMA (alpha=1/8); dash siniflandirmasi icin
+int steerSmooth = 0;                  // sonulmus (EMA, giris +-400 kırpik) direksiyon; siniflandirma icin
+byte reacquireCount = 0;              // yeniden yakalama teyit sayaci (ardisik dongu)
+unsigned long sideSinceMs = 0;        // kesikte bant-disI cizginin ilk gorunme ani (0 = yok)
+bool sideSignRight = false;           // bant-disi temasin tarafi (true = sag)
+unsigned long dampUntil = 0;          // yeniden yakalama sonrasi yumusatma penceresi sonu
 
 // intersection control
 bool inIntersection = false;
@@ -49,14 +53,20 @@ void runInit() {
   previousError = 0;
   inIntersection = false;
   intersectionStartTime = 0;
+  stopBrake_flag = false;  // kosu baslarken fren her zaman ACIK baslar
+  stopBrakeStartTime = 0;
 
   // TEAM: kayip / yeniden yakalama durumunu sifirla
   offlineEpisodeActive = false;
   offlineIsDash = false;
   offlineSearchSide = LEFT;
   lastOnLinePosition = 0;  // 0 = "henuz gecerli cizgi konumu yok"
-  lastLinePWM = 0;
+  posSmooth = LINE_CENTER_POSITION;
+  steerSmooth = 0;
   reacquireCount = 0;
+  sideSinceMs = 0;
+  sideSignRight = false;
+  dampUntil = 0;
 
   velPWMDecrement = velocityPWM;
   impPWMDecrement = IMPELLER_PWM;  // Tribün 250 ms rampayla tam devre çıkar
@@ -104,9 +114,9 @@ void updatePWMDecrementRamps() {
 // =====================================================================
 //
 //   WAIT_IDLE  ──(Sinyal stabil 5V)──> ARMED
-//   ARMED      ──(Kumanda 1. basış: 5V -> 0V, 60 ms teyit)──> PREVACUUM
-//   PREVACUUM  ──(INH=1, Tekerlek=0, Tribün 1 sn tam devir)──> RUN
-//   RUN        ──(Kumanda 2. basış: 0V -> 5V, 50 ms teyit)──> 500 ms fren ──> KALICI KİLİT
+//   ARMED      ──(Kumanda 1. basış: 5V -> 0V, 60 ms teyit)──> RUN
+//   RUN        ──kalkışta tekerlek 150 ms, tribün 250 ms rampayla devrede──
+//              ──(Kumanda 2. basış: 0V -> 5V, 150 ms teyit)──> 500 ms fren ──> KALICI KİLİT
 //
 void run() {
   bool started = false;
@@ -292,24 +302,47 @@ void updatePeriod() {
   // gosterir; bunlar "sinir/yabanci cizgi" kabul edilip kayip sayilir.
   const bool lineFound = (isOnLine && position && position != (TOTAL_SENSORS - 1) * 1000);
 
-  // TEAM: YENIDEN YAKALAMA KAPISI (yanlis cizgiye kilitlenme korumasi)
-  //  - Kayip sirasinda cizgi ardisik OFFLINE_MIN_CONFIRM_LOOPS dongu
-  //    boyunca gorulmezse teyit edilmemis sayilir (tek sensorluk parazit).
-  //  - Kesikli cizgi baglaminda (offlineIsDash) kopru penceresi icinde
-  //    devam cizgisinin merkez bandinda olmasi beklenir; barin ucundan
-  //    gorunen yabanci yanal / pist disi cizgi kabul edilmez.
-  bool lineAccepted = lineFound;
+  // TEAM: YENIDEN YAKALAMA KAPILARI (27 Eyl saha duzeltmesi)
+  //  - Kayip yoksa: cizgi her zaman kabul (normal PID takibi).
+  //  - DUZ KESIK kaybinda:
+  //      * Merkez bantta cizgi -> MIN_CONFIRM ardisik dongude kabul
+  //        (beklenen devam cizgisi; tek karelik parazit elenir).
+  //      * Bant disinda ama KALICI cizgi (>= SIDE_CONFIRM_MS, ayni
+  //        tarafta) -> gercek egri / zikzak sonrasi parca kabulu.
+  //        Kisa sureli kenar temaslari (kesik kosesi paraziti) elenir
+  //        ve teyit sayacini ZEHIRLEMEZ.
+  //  - DONUS kaybinda: arama sirasinda herhangi bir konumdaki cizgi,
+  //    MIN_CONFIRM ardisik dongude kabul edilir.
+  bool lineAccepted = false;
   if (lineFound) {
-    if (offlineEpisodeActive && reacquireCount < OFFLINE_MIN_CONFIRM_LOOPS) {
-      reacquireCount++;
-      lineAccepted = false;
-    } else if (offlineEpisodeActive && offlineIsDash &&
-               (currentTime - offlineStartTime) <= OFFLINE_DASH_BRIDGE_MS) {
+    if (!offlineEpisodeActive) {
+      lineAccepted = true;
+    } else if (offlineIsDash) {
       const int posErrAbs = abs((int)position - LINE_CENTER_POSITION);
-      if (posErrAbs > OFFLINE_DASH_REACQUIRE_BAND) lineAccepted = false;
+      if (posErrAbs <= OFFLINE_DASH_REACQUIRE_BAND) {
+        sideSinceMs = 0;
+        if (reacquireCount < 255) reacquireCount++;
+        if (reacquireCount >= OFFLINE_MIN_CONFIRM_LOOPS) lineAccepted = true;
+      } else {
+        reacquireCount = 0;
+        const bool sideRight = ((int)position > LINE_CENTER_POSITION);
+        if (sideSinceMs == 0 || sideRight != sideSignRight) {
+          sideSinceMs = currentTime;  // yeni taraf/yeni temas: sayaci bastan
+          sideSignRight = sideRight;
+        } else if (currentTime - sideSinceMs >= OFFLINE_DASH_SIDE_CONFIRM_MS) {
+          lineAccepted = true;  // bant disi ama kalici: gercek geometri
+        }
+      }
+    } else {
+      // DONUS aramasi: gecici temas sayaci — temas kesilirse (asagidaki
+      // else) sifirlanir; YALNIZCA kesintisiz temas TRACK_MS dolunca kabul.
+      // Arkadan gelen/egik kisa temaslar robotu kendine kilitleyemez.
+      if (sideSinceMs == 0) sideSinceMs = currentTime;
+      else if (currentTime - sideSinceMs >= OFFLINE_SEARCH_TRACK_MS) lineAccepted = true;
     }
   } else {
-    reacquireCount = 0;  // cizgi yok: teyit sayaci sifirlanir
+    reacquireCount = 0;
+    sideSinceMs = 0;
   }
 
   if (stopBrake_flag) {
@@ -334,7 +367,9 @@ void updatePeriod() {
     // TEAM: kesiste duz gidiyoruz; kayip baglamini da guncelle
     offlineEpisodeActive = false;
     reacquireCount = 0;
-    lastLinePWM = 0;
+    sideSinceMs = 0;
+    steerSmooth = 0;
+    posSmooth = position;
     lastOnLinePosition = position;
 
   } else if (lineAccepted) {
@@ -348,63 +383,83 @@ void updatePeriod() {
     // Hata hesapla
     const int error = position - LINE_CENTER_POSITION;
 
-    // TEAM: Kopru/arama sonrasi cizgiyi yeniden yakaladigimiz ilk dongude
-    // deltaError = 0 alinir. Eski surumde previousError kopru boyunca
-    // guncellenmedigi icin yeniden yakalamada buyuk bir turev darbesi
-    // (derivative kick) olusuyor ve robot savruluyordu.
+    // TEAM: Kayip/kopru sonrasi ilk kabul dongusunde deltaError = 0
+    // (turev darbesi onlemi). Ayrica kisa bir yumusatma penceresi
+    // baslar: bu pencerede direksiyon duzeltmesi REACQUIRE_STEER_CLAMP
+    // ile sinirlanir; kesik girisindeki konum sicalamasi robota zikzak
+    // olarak yansimaz.
     int deltaError = 0;
     if (offlineEpisodeActive) {
       offlineEpisodeActive = false;  // kayip olayi kapandi
       reacquireCount = 0;
+      sideSinceMs = 0;
+      dampUntil = currentTime + REACQUIRE_DAMP_MS;
     } else {
       deltaError = error - previousError;
     }
     previousError = error;
 
-    // PID kontrol terimi
+    // PD kontrol terimi
     long linePWM = ((float)(error) * KP) + ((float)(deltaError) * KD);
 
     if (linePWM > 1000) linePWM = 1000;
     else if (linePWM < -1000) linePWM = -1000;
 
+    // Yeniden yakalama yumusatma penceresi
+    if (currentTime < dampUntil) {
+      if (linePWM > REACQUIRE_STEER_CLAMP) linePWM = REACQUIRE_STEER_CLAMP;
+      else if (linePWM < -REACQUIRE_STEER_CLAMP) linePWM = -REACQUIRE_STEER_CLAMP;
+    }
+
     // Motor PWM değerleri
     outputPWML = velocityPWM - velPWMDecrement + linePWM;
     outputPWMR = velocityPWM - velPWMDecrement - linePWM;
 
-    // TEAM: kayip aninda siniflandirma icin baglam bilgisi saklanir
-    lastLinePWM = (int)linePWM;
+    // TEAM: kayip aninda siniflandirma icin baglam bilgisi saklanir.
+    // steerSmooth: ani PD darbesinden arindirilmis EMA (alpha=1/4, giris
+    // +-400'e kırpilir); posSmooth: konum EMA (alpha=1/8). Siniflandirma
+    // bu sonulmus degerlerle yapilir; tek donguluk turev/konum sicalamasi
+    // duz kesigi "donus" gibi gosteremez (sahadaki saga-sapma arizasi).
+    int steerIn = (int)linePWM;
+    if (steerIn > 400) steerIn = 400;
+    else if (steerIn < -400) steerIn = -400;
+    steerSmooth += (steerIn - steerSmooth) / 4;
+    posSmooth += ((int)position - (int)posSmooth) / 8;
     lastOnLinePosition = position;
 
     offlineStartTime = currentTime;
 
   } else {
-    // 4) OFFLINE METHOD (kesik cizgi koprusu / yumusak arama / guvenli durus)
+    // 4) OFFLINE METHOD (kesik cizgi koprusu / sinirli arama / guvenli durus)
     const unsigned long offlineElapsedTime = currentTime - offlineStartTime;
 
     // TEAM: Kaybin ilk dongusunde kayip baglami siniflandirilir.
-    //  - Konum merkez bandinda VE son direksiyon duzeltmesi kucukse:
-    //    "duz kesikli cizgi boslugu" -> uzun duz devam penceresi kullanilir.
-    //  - Aksi halde: keskin kose / viraj cikisi -> kisa kopru + arama.
+    // Siniflandirma SONULMUS direksiyon (steerSmooth) ile yapilir; boylece
+    // bosluk girisindeki ani turev darbesi duz kesigi "donus" gibi
+    // gostererek boslugun ortasinda arama baslatamaz (saha arizasiydi:
+    // robot saga sapip pist disina cikiyor / geri donuyordu).
+    //  - Konum merkez bandinda VE sonulmus direksiyon kucukse:
+    //    "duz kesikli cizgi boslugu" -> DUZ kor devam, asla donme.
+    //  - Aksi halde: keskin kose / virak cikisi -> kisa kopru +
+    //    SINIRLI yerinde arama.
     if (!offlineEpisodeActive) {
       offlineEpisodeActive = true;
       reacquireCount = 0;
+      sideSinceMs = 0;
       offlineSearchSide = lastDetectedSide;  // arama manevrasinin ilk yonu
 
-      const int posErr = (int)lastOnLinePosition - LINE_CENTER_POSITION;
+      const int posErr = (int)posSmooth - LINE_CENTER_POSITION;
       offlineIsDash = (lastOnLinePosition != 0) &&
                       (abs(posErr) <= OFFLINE_DASH_CENTER_BAND) &&
-                      (abs(lastLinePWM) <= OFFLINE_DASH_STEER_MAX);
+                      (abs(steerSmooth) <= OFFLINE_DASH_STEER_MAX);
     }
 
-    // Failsafe: Çizgi çok uzun süre kayıpsa güvenli fren başlat
+    // Ust guvenlik agi: cizgi bu surede kabul edilemediyse fren + kilit
     if (offlineElapsedTime >= OFFLINE_FAILSAFE_MS && !stopBrake_flag) {
       stopBrakeStartTime = currentTime;
       stopBrake_flag = true;
       setLEDS(0);
     }
-
-    // Bu kayip olayi icin gecerli kopru (kor devam) suresi
-    const unsigned long bridgeTime = offlineIsDash ? OFFLINE_DASH_BRIDGE_MS : OFFLINE_GAP_BRIDGE_MS;
 
     if (stopBrake_flag) {
       // Fren rampası
@@ -412,42 +467,66 @@ void updatePeriod() {
       outputPWML = base;
       outputPWMR = base;
 
-    } else if (offlineElapsedTime <= bridgeTime) {
-      // KOR DEVAM (kopru):
-      //  - Kesikli cizgide ilerleme neredeyse duzdur; son direksiyon
-      //    yumusakca azaltilarak korunur (hafif egim toleransi).
-      //  - Donuste direksiyon tamamen birakilir; robot savrulmaz.
-      int holdSteer = 0;
-      if (offlineIsDash) {
-        holdSteer = lastLinePWM * (int)(bridgeTime - offlineElapsedTime) / (int)bridgeTime;
-        if (holdSteer > OFFLINE_DASH_HOLD_STEER_MAX) holdSteer = OFFLINE_DASH_HOLD_STEER_MAX;
-        else if (holdSteer < -OFFLINE_DASH_HOLD_STEER_MAX) holdSteer = -OFFLINE_DASH_HOLD_STEER_MAX;
+    } else if (offlineIsDash) {
+      // DUZ KESIKLI CIZGI — KOR DUZ DEVAM:
+      // Direksiyon TAMAMEN sifirdir (eski surum kayip anindaki son PID
+      // degerini tutuyordu; bu, bosluk girisindeki turev darbesini
+      // buzluga tasiyip robotu saga/sola yaylardiyordu). Bu pencerede
+      // asla donus/arama yapilmaz: devam cizgisi ileride, merkezdedir ve
+      // kabul kapisi onu karsilar. Bosluk pencereyi asarsa guvenli durus.
+      const int base = velocityPWM - velPWMDecrement;
+      outputPWML = base;
+      outputPWMR = base;
+
+      if (offlineElapsedTime >= OFFLINE_DASH_COAST_MS) {
+        stopBrakeStartTime = currentTime;
+        stopBrake_flag = true;
+        setLEDS(0);
       }
 
+    } else if (offlineElapsedTime <= OFFLINE_GAP_BRIDGE_MS) {
+      // DONUS — kisa kopru: direksiyon birakilir, robot savrulmadan
+      // son yonunde bir an daha ilerler.
       const int base = velocityPWM - velPWMDecrement;
-      outputPWML = base + holdSteer;
-      outputPWMR = base - holdSteer;
+      outputPWML = base;
+      outputPWMR = base;
 
     } else {
-      // ARAMA MANEVRASI (yerinde donus, iki yonlu):
-      // Kopru suresi doldu, cizgi hala yok. Bar cevrilerek cizgi aranir:
-      // dis teker +PWM, ic teker -PWM -> robot ileri kacmaz, yerinde
-      // doner. Bir faz sonunda yon ters cevrilir. Eski surumdeki gibi
-      // tam gucle (200/-120) ve sinirsiz pivot yoktur; bu yuzden robot
-      // pist disina savrulup yabanci cizgiye kilitlenmez.
-      const unsigned long searchElapsed = offlineElapsedTime - bridgeTime;
+      // DONUS — SINIRLI yerinde arama + GECICI TAKIP:
+      // Butce: FIRST sure kaybedilen yone, sonra (MAX'a kadar) tek ters
+      // faz; asilirsa ve o an cizgi gorunmuyorsa fren + kilit. Arama
+      // sirasinda cizgi gorunurse hemen kilitlenilmez: turevsiz ve kisitli
+      // duzeltmeyle GECICI TAKIP yapilir; yukaridaki kapi ancak temas
+      // TRACK_MS kesintisiz surerse kabul eder. Boylece 180+ derece donup
+      // geldigi cizgiye geri kilitlenme (saha arizasi) imkansizlasir.
+      const unsigned long searchElapsed = offlineElapsedTime - OFFLINE_GAP_BRIDGE_MS;
 
-      bool searchDir = offlineSearchSide;
-      if (((searchElapsed / OFFLINE_SEARCH_PHASE_MS) % 2) != 0) {
-        searchDir = !searchDir;  // faz sonunda ters yon
-      }
-
-      if (searchDir == LEFT) {
-        outputPWML = -OFFLINE_SEARCH_PWM;
-        outputPWMR = OFFLINE_SEARCH_PWM;
+      const int base = velocityPWM - velPWMDecrement;
+      if (lineFound) {
+        // Gecici takip: kisitli P duzeltmesi (turev yok, buyuk hamle yok)
+        int steer = (int)(((float)((int)position - LINE_CENTER_POSITION)) * KP);
+        if (steer > REACQUIRE_STEER_CLAMP) steer = REACQUIRE_STEER_CLAMP;
+        else if (steer < -REACQUIRE_STEER_CLAMP) steer = -REACQUIRE_STEER_CLAMP;
+        outputPWML = base + steer;
+        outputPWMR = base - steer;
+      } else if (searchElapsed >= OFFLINE_SEARCH_MAX_MS) {
+        // Butce doldu, cizgi yok: guvenli durus
+        stopBrakeStartTime = currentTime;
+        stopBrake_flag = true;
+        setLEDS(0);
+        outputPWML = base;
+        outputPWMR = base;
       } else {
-        outputPWML = OFFLINE_SEARCH_PWM;
-        outputPWMR = -OFFLINE_SEARCH_PWM;
+        // Yerinde donus: once kaybedilen yone kisa faz, sonra ters yone
+        const bool searchDir = (searchElapsed < OFFLINE_SEARCH_FIRST_MS)
+                               ? offlineSearchSide : !offlineSearchSide;
+        if (searchDir == LEFT) {
+          outputPWML = -OFFLINE_SEARCH_PWM;
+          outputPWMR = OFFLINE_SEARCH_PWM;
+        } else {
+          outputPWML = OFFLINE_SEARCH_PWM;
+          outputPWMR = -OFFLINE_SEARCH_PWM;
+        }
       }
     }
   }
